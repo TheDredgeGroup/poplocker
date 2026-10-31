@@ -405,11 +405,15 @@ def ears_watch():
 
 
 def hand_over(paras):
-    """If you last talked through another PC (the ears there asked for it - route.json), send this reply there to
-    be read instead of reading it here. -> where it went, or None to read it here."""
+    """If this reply answers a message sent from another PC (the ears there asked for it - route.json), send it
+    there to be read instead of reading it here. -> where it went, or None to read it here.
+    Only that one reply goes: the chat file can't tell a message typed here from one sent there, so a lasting
+    route sent replies to typing on this PC over to the other PC too. Each message from there asks again."""
+    path = os.path.join(HERE, "route.json")
     try:
-        with open(os.path.join(HERE, "route.json")) as f:
+        with open(path) as f:
             route = json.load(f)
+        os.remove(path)
         if time.time() - route.get("at", 0) > 2 * 3600 or not route.get("to"):
             return None
         import urllib.request
