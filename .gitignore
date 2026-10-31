@@ -1,0 +1,34 @@
+# big binaries - they ship in the installer zip on the Releases page
+piper/
+voices/
+python/
+runtime/
+models/
+Android/
+*.apk
+*.aab
+*.zip
+
+# made on each PC by Setup or at run time - private to that PC
+db.json
+ears_key.txt
+iPhone address.txt
+main_pc.txt
+player_settings.json
+last_reply.json
+ears_status.txt
+ears.pid
+ears_off
+talk_now
+control.txt
+OFF
+data/
+*.wav
+*.log
+
+# signing keys never go in the repo
+*.keystore
+*.jks
+
+__pycache__/
+*.pyc
