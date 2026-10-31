@@ -334,6 +334,8 @@ def stop():
 
 
 def ears_running():
+    """The process in ears.pid is alive AND is this app's Python - Windows reuses process numbers, and a stale
+    ears.pid that now belongs to another program kept the ears from ever being started again."""
     try:
         pid = int(open(os.path.join(HERE, "ears.pid")).read())
         h = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
@@ -341,8 +343,12 @@ def ears_running():
             return False
         code = ctypes.c_ulong()
         ctypes.windll.kernel32.GetExitCodeProcess(h, ctypes.byref(code))
+        name = ctypes.create_unicode_buffer(1024)
+        size = ctypes.c_ulong(1024)
+        got_name = ctypes.windll.kernel32.QueryFullProcessImageNameW(h, 0, name, ctypes.byref(size))
         ctypes.windll.kernel32.CloseHandle(h)
-        return code.value == 259          # STILL_ACTIVE
+        ours = got_name and os.path.dirname(name.value).lower() == os.path.dirname(EARS_PY).lower()
+        return code.value == 259 and bool(ours)          # STILL_ACTIVE
     except (OSError, ValueError):
         return False
 

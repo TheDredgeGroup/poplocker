@@ -416,10 +416,12 @@ def handle_words(said, from_phone=False):
 # ---- the iPhone door ------------------------------------------------------------------------------------------
 class Door(BaseHTTPRequestHandler):
     def log_message(self, fmt, *a):
-        # every knock on the door, so "request timed out" on the phone can be traced (2026-10-29)
+        # every knock on the door, so "request timed out" on the phone can be traced (2026-10-29); the key in
+        # the address (/say?key=...) is never written down
+        line = re.sub(r"([?&]key=)[^&\s\"]*", r"\1<key>", fmt % a)
         try:
             with open(os.path.join(HERE, "ears.log"), "a", encoding="utf-8") as f:
-                f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {self.client_address[0]} {fmt % a}\n")
+                f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {self.client_address[0]} {line}\n")
         except OSError:
             pass
 
