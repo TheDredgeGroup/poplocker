@@ -1,12 +1,12 @@
-<img src="icon/poplocker_256.png" alt="Pop Locker" width="96" align="left">
+<img src="icon/poplocker_256.png" alt="PopLocker" width="96" align="left">
 
-# Pop Locker
+# PopLocker
 
 **POP = Projects On Premises.** Your projects, chats and code, locked away on your own PC.
 
 <a href="https://buymeacoffee.com/vioprime1h"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="50"></a>
 
-Pop Locker is a companion for Claude Code on Windows. It isn't made by or affiliated with Anthropic.
+PopLocker is a companion for Claude Code on Windows. It isn't made by or affiliated with Anthropic.
 
 - **Reads Claude Code's replies out loud** in a small window, and skips the code, tables, file paths and links.
   Back, Pause, Skip and Stop buttons, or click any paragraph to read from there. Male or female voice.
@@ -35,7 +35,7 @@ The full instructions are in [README.txt](README.txt).
 | `claude_chat_save.py` | Saves the chats to the database |
 | `chat_search.pyw` | The History search window |
 | `Setup.bat`, `setup_claude_voice.ps1`, `setup_hooks.py` | The installer |
-| `NuePost/` | Android app (Kotlin, Android Studio): hold to talk, posts your words to Pop Locker |
+| `NuePost/` | Android app (Kotlin, Android Studio): hold to talk, posts your words to PopLocker |
 
 The speech engine, the voices, Python and PostgreSQL are left out of the repo because of their size. They're in
 the Releases zip.
@@ -52,4 +52,4 @@ the Releases zip.
 
 ## License
 
-MIT for the Pop Locker code. See [LICENSE](LICENSE).
+MIT for the PopLocker code. See [LICENSE](LICENSE).
