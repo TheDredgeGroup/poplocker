@@ -90,12 +90,26 @@ class MainActivity : ComponentActivity() {
         // JSONObject escapes quotes and backslashes in what was said
         val json = org.json.JSONObject().put(key, text).toString()
         val body = json.toRequestBody("application/json".toMediaType())
-        val request = Request.Builder().url(url).post(body).build()
+        val builder = Request.Builder().url(url).post(body)
+        val accessKey = prefs.getString("access_key", "") ?: ""
+        if (accessKey.isNotBlank()) builder.addHeader("X-Key", accessKey.trim())
 
-        client.newCall(request).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) {}
-            override fun onResponse(call: Call, response: Response) { response.close() }
+        client.newCall(builder.build()).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) { showProblem("Couldn't reach the PC") }
+            override fun onResponse(call: Call, response: Response) {
+                val refused = when (response.code) {
+                    403 -> "The PC refused the Access Key or address"
+                    429 -> "Too many wrong keys. Try again in 15 minutes"
+                    else -> null
+                }
+                response.close()
+                if (refused != null) showProblem(refused)
+            }
         })
+    }
+
+    private fun showProblem(message: String) {
+        runOnUiThread { android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_LONG).show() }
     }
 
     override fun onDestroy() {

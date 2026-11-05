@@ -21,6 +21,7 @@ ears.pid
 ears_off
 talk_now
 control.txt
+skipped_files.txt
 OFF
 data/
 *.wav

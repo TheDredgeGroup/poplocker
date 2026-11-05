@@ -22,6 +22,7 @@ fun NuePostScreen(onMicDown: () -> Unit, onMicUp: () -> Unit) {
 
     var url by remember { mutableStateOf(prefs.getString("url", "") ?: "") }
     var key by remember { mutableStateOf(prefs.getString("key", "text") ?: "text") }
+    var accessKey by remember { mutableStateOf(prefs.getString("access_key", "") ?: "") }
     var showSettings by remember { mutableStateOf(false) }
     var isListening by remember { mutableStateOf(false) }
     var statusText by remember { mutableStateOf("Hold to speak") }
@@ -44,11 +45,17 @@ fun NuePostScreen(onMicDown: () -> Unit, onMicUp: () -> Unit) {
                         label = { Text("JSON Key") },
                         modifier = Modifier.fillMaxWidth()
                     )
+                    OutlinedTextField(
+                        value = accessKey,
+                        onValueChange = { accessKey = it },
+                        label = { Text("Access Key") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
             },
             confirmButton = {
                 TextButton(onClick = {
-                    prefs.edit().putString("url", url).putString("key", key).apply()
+                    prefs.edit().putString("url", url).putString("key", key).putString("access_key", accessKey).apply()
                     showSettings = false
                 }) { Text("Save") }
             },

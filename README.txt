@@ -48,21 +48,23 @@ TALK FROM YOUR iPHONE (the iPhone has to be on the same Wi-Fi)
 Setup puts your address and private key in "iPhone address.txt". In the Shortcuts app, make a shortcut
 called "Tell Pop Locker" with these 4 actions:
 1. Dictate Text. Stop Listening: After Pause.
-2. Get Contents of URL. Use the address from "iPhone address.txt". Then:
+2. Get Contents of URL. Use the URL from "iPhone address.txt". Then:
    - Method: POST;
+   - Headers: add one called X-Key, and paste the key from "iPhone address.txt" as its value;
    - Request Body: JSON;
    - add one Text field: text = Dictated Text.
 3. Get Dictionary Value. Get: Value, for Key: response, in: Contents of URL.
 4. Speak Text. Text: Dictionary Value.
 Then say "Hey Siri, Tell Pop Locker" and talk. Your words get typed into the Claude chat that's open. The reply
 is read on this PC.
-Keep the key private: anyone on your Wi-Fi who has it can type to Claude.
+Keep the key private: anyone on your Wi-Fi who has it can type to Claude. The phone talks to the PC over plain
+HTTP, so only use this on a Wi-Fi network you trust. Five wrong keys shut that device out for 15 minutes.
 
 TALK FROM AN ANDROID PHONE (same Wi-Fi)
 1. Copy Android\NuePost.apk from this folder to the phone and open it. Android asks you to allow installs
    from that app (Files, Drive or similar) the first time - allow it, then tap Install.
 2. Open NuePost and allow the microphone.
-3. Tap Settings. Endpoint URL: the address from "iPhone address.txt". JSON Key: text. Tap Save.
+3. Tap Settings. Endpoint URL and Access Key: from "iPhone address.txt". JSON Key: text. Tap Save.
 4. Hold the big mic button, talk, and let go. Your words get typed into the Claude chat that's open, and the
    reply is read on this PC.
 

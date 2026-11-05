@@ -93,17 +93,22 @@ $s.Save()
 # 5. chats already on this PC, and the phone's address
 Write-Host "[5/5] Saving the Claude chats already on this PC..."
 & $py "$D\claude_chat_save.py" --all
-if (-not (Test-Path "$D\ears_key.txt")) {
-    $w = 'river','tiger','maple','rocket','cactus','harbor','pepper','falcon','meadow','copper','walnut','canyon','sunset','violet','marble','badger'
-    $k = ((1..3 | % { $w | Get-Random }) -join '-') + '-' + (Get-Random -Minimum 10 -Maximum 99)
+$old = (Test-Path "$D\ears_key.txt") -and ((Get-Content "$D\ears_key.txt" -Raw).Trim() -cmatch '^[a-z]+-[a-z]+-[a-z]+-\d{2}$')
+if ($old -or -not (Test-Path "$D\ears_key.txt")) {
+    $k = (& $py -c "import secrets; print(secrets.token_urlsafe(32))" | Out-String).Trim()
+    if ($k.Length -lt 40) { throw "Couldn't make a phone key." }
     Set-Content "$D\ears_key.txt" $k -NoNewline
+    if ($old) {
+        Write-Host "      The old phone key was too easy to guess, so it has been replaced." -ForegroundColor Yellow
+        Write-Host "      Set up your phone again, and copy ears_key.txt to any other PC you use." -ForegroundColor Yellow
+    }
 }
 $k = (Get-Content "$D\ears_key.txt" -Raw).Trim()
 $ip = (Get-NetIPAddress -AddressFamily IPv4 | ? { $_.IPAddress -like '192.168.*' -or $_.IPAddress -like '10.*' } | select -First 1).IPAddress
-$url = "http://${ip}:5055/say?key=$k"
-Set-Content "$D\iPhone address.txt" "Put this in your iPhone shortcut's Get Contents of URL step (POST, JSON field: text),`r`nor in NuePost's Settings on Android (Endpoint URL; JSON Key: text):`r`n$url" -Encoding utf8
-Write-Host "      Phone address (iPhone shortcut or NuePost):" -ForegroundColor Cyan
-Write-Host "      $url" -ForegroundColor Yellow
+$url = "http://${ip}:5055/say"
+Set-Content "$D\iPhone address.txt" "iPhone shortcut, in the Get Contents of URL step (POST, JSON field: text):`r`n  URL: $url`r`n  Headers: add X-Key, with the key below as its value`r`n`r`nNuePost on Android, in Settings:`r`n  Endpoint URL: $url`r`n  JSON Key: text`r`n  Access Key: the key below`r`n`r`nKey (keep it private: anyone who has it and is on your Wi-Fi can type to Claude):`r`n$k" -Encoding utf8
+Write-Host "      Phone address and private key are in:" -ForegroundColor Cyan
+Write-Host "      $D\iPhone address.txt" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "Done. Double-click 'Pop Locker' on the Desktop to start it (it also starts with Windows)." -ForegroundColor Green
 Write-Host "The first time, Windows may ask to allow it on the network - click Allow (Private networks) so the iPhone can reach it."

@@ -8,14 +8,15 @@ is pressed, like a person typing it:
      so the graphics card stays free. "Hey Computer, pause / skip / back / stop / play" work the reader
      instead of being sent.
   2. The iPhone: a Siri Shortcut posts {"text": ...} to http://<this PC>:5055/say with the key from
-     ears_key.txt (anyone on the Wi-Fi could otherwise type into Claude). The answer comes back to the phone
-     when Claude finishes within ~3 minutes, so Siri can read it; it always plays on the PC too.
+     ears_key.txt in its X-Key header (anyone on the Wi-Fi could otherwise type into Claude). A key in the
+     address is refused, and a few wrong keys lock that device out for a while. The answer comes back to the
+     phone when Claude finishes within ~3 minutes, so Siri can read it; it always plays on the PC too.
 
 Files it shares with the player (all in this folder): ears_off (mic not listening while it exists),
 talk_now (record the next thing said as a message, no wake word), control.txt (reader commands for the player),
 ears_status.txt (what the player shows under its buttons), ears.pid.
 """
-import ctypes, ctypes.wintypes as wt, difflib, json, os, re, threading, time, winsound
+import ctypes, ctypes.wintypes as wt, difflib, hmac, json, os, re, threading, time, winsound
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -115,12 +116,15 @@ CONTROLS = {"pause": "pause", "paws": "pause", "skip": "skip", "next": "skip", "
 with open(os.path.join(HERE, "ears.pid"), "w") as f:
     f.write(str(os.getpid()))
 if not os.path.exists(KEY_FILE):
-    import secrets    # plain words: easy to type into a phone shortcut (a mixed-case key got mistyped)
-    words = ["river", "tiger", "maple", "rocket", "cactus", "harbor", "pepper", "falcon", "meadow", "copper",
-             "walnut", "canyon", "sunset", "violet", "marble", "badger", "lemon", "comet", "willow", "ember"]
+    import secrets
     with open(KEY_FILE, "w") as f:
-        f.write("-".join(secrets.choice(words) for _ in range(3)) + f"-{secrets.randbelow(90) + 10}")
+        f.write(secrets.token_urlsafe(32))
 KEY = open(KEY_FILE).read().strip()
+OLD_KEY = re.compile(r"[a-z]+-[a-z]+-[a-z]+-\d{2}")     # three words and a number: few enough to guess; Setup replaces it
+MAX_WRONG, LOCK_SECONDS = 5, 15 * 60                     # wrong keys allowed from one device, and how long it's then shut out
+MAX_BODY = 1_000_000
+wrong_keys = {}                                          # device's address -> [wrong keys so far, locked until]
+wrong_lock = threading.Lock()
 
 send_lock = threading.Lock()
 
@@ -414,6 +418,32 @@ def handle_words(said, from_phone=False):
 
 
 # ---- the iPhone door ------------------------------------------------------------------------------------------
+def key_is_right(given):
+    return isinstance(given, str) and hmac.compare_digest(given.encode("utf-8"), KEY.encode("utf-8"))
+
+
+def locked_out(ip):
+    with wrong_lock:
+        entry = wrong_keys.get(ip)
+        if not entry or not entry[1]:
+            return False
+        if entry[1] > time.time():
+            return True
+        del wrong_keys[ip]       # the time is up: a clean start
+        return False
+
+
+def note_wrong_key(ip):
+    """Returns True when this wrong key is the one that locks the device out."""
+    with wrong_lock:
+        entry = wrong_keys.setdefault(ip, [0, 0])
+        entry[0] += 1
+        if entry[0] < MAX_WRONG:
+            return False
+        entry[1] = time.time() + LOCK_SECONDS
+        return True
+
+
 class Door(BaseHTTPRequestHandler):
     def log_message(self, fmt, *a):
         # every knock on the door, so "request timed out" on the phone can be traced (2026-10-29); the key in
@@ -440,13 +470,31 @@ class Door(BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
         if path not in ("/say", "/route", "/read"):
             return self._answer(404, {"response": "Not here."})
+        ip = self.client_address[0]
+        if locked_out(ip):
+            return self._answer(429, {"response": "Too many wrong keys. Try again in 15 minutes."})
         try:
-            data = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+            length = int(self.headers.get("Content-Length", 0))
+            if length > MAX_BODY:
+                return self._answer(413, {"response": "That's too long."})
+            data = json.loads(self.rfile.read(length) or b"{}")
         except ValueError:
             data = {}
+        if not isinstance(data, dict):
+            data = {}
+        given = self.headers.get("X-Key") or data.get("key")
+        if not given and re.search(r"[?&]key=", self.path):   # never checked, so it's no way to guess, and not a wrong key
+            self.log_message("refused: key in the address")
+            return self._answer(403, {"response": "Put the key in the X-Key header, not the address."})
+        if not key_is_right(given):
+            self.log_message("wrong key on %s", path)
+            if note_wrong_key(ip):
+                self.log_message("locked out for %d seconds", LOCK_SECONDS)
+                status(f"⚠ Wrong phone key {MAX_WRONG} times from {ip}: shut out for 15 minutes")
+            return self._answer(403, {"response": "Wrong key."})
+        with wrong_lock:
+            wrong_keys.pop(ip, None)
         if path != "/say":
-            if data.get("key") != KEY:
-                return self._answer(403, {"response": "Wrong key."})
             if path == "/route":      # another PC: "read Claude's replies over here"
                 with open(ROUTE_FILE, "w") as f:
                     json.dump({"to": data.get("to", ""), "at": time.time()}, f)
@@ -460,11 +508,7 @@ class Door(BaseHTTPRequestHandler):
                 os.replace(tmp, REPLY_FILE)
             return self._answer(200, {"response": "ok"})
         self.log_message("POST /say fields=%s", sorted(data))
-        from urllib.parse import parse_qs, urlparse
-        in_url = (parse_qs(urlparse(self.path).query).get("key") or [""])[0]   # http://...:5055/say?key=...
-        if KEY not in (data.get("key"), self.headers.get("X-Key"), in_url):
-            return self._answer(403, {"response": "Wrong key."})
-        text = (data.get("text") or "").strip()
+        text = str(data.get("text") or "").strip()
         if not text:
             return self._answer(200, {"response": "I didn't hear anything."})
         sent_at = time.time()
@@ -489,6 +533,8 @@ class Door(BaseHTTPRequestHandler):
 
 
 def serve():
+    if OLD_KEY.fullmatch(KEY):
+        status("⚠ The phone key is an old, guessable one. Run Setup again to replace it.")
     ThreadingHTTPServer(("0.0.0.0", PORT), Door).serve_forever()
 
 

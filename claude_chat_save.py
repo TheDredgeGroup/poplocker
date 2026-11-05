@@ -88,17 +88,63 @@ def text_of(content):
 
 FILE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
 MAX_BYTES = 3_000_000
-SECRET_NAME = re.compile(r"key|token|secret|password|credential|\.env$", re.I)
+SKIPPED_LOG = os.path.join(HERE, "skipped_files.txt")
+# files that are secrets whatever they're called
+SECRET_FILE = re.compile(r"^\.env(\..+)?$|\.env$|^id_(rsa|dsa|ecdsa|ed25519)$|\.(pem|key|pfx|p12|jks|keystore|ppk)$", re.I)
+# whole words in a file's name, so tokenizer.py and keyboard.py aren't caught
+SECRET_WORDS = {"secret", "secrets", "password", "passwords", "passwd", "pwd", "credential", "credentials", "creds", "apikey"}
+SECRET_PAIRS = {("api", "key"), ("api", "keys"), ("private", "key"), ("access", "key"), ("auth", "token"), ("access", "token")}
+# "key" or "token" alone: a settings or text file is probably a secret, source code probably isn't (its values are
+# still blanked out below)
+MAYBE_WORDS = {"key", "keys", "token", "tokens"}
+CODE_FILES = {".py", ".pyw", ".js", ".jsx", ".ts", ".tsx", ".java", ".kt", ".c", ".h", ".cpp", ".hpp", ".cs", ".go", ".rs", ".rb",
+              ".php", ".swift", ".gd", ".lua", ".sql", ".html", ".css", ".md", ".ps1", ".bat", ".sh"}
 # passwords and API keys written into the code are blanked out - the code stays usable, the secret doesn't get
 # copied into one more place
+SECRET_BLOCK = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.S)
 SECRET_VALUES = [
-    re.compile(r"(?:xai-|sk-ant-|sk-|ghp_|github_pat_)[A-Za-z0-9_-]{20,}"),
+    re.compile(r"(?:xai-|sk-ant-|sk-|ghp_|github_pat_)[A-Za-z0-9_-]{20,}"
+               r"|\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"                                 # AWS
+               r"|\bAIza[0-9A-Za-z_-]{35}(?![0-9A-Za-z_-])|\bGOCSPX-[0-9A-Za-z_-]{20,}|\bya29\.[0-9A-Za-z._-]{20,}"   # Google
+               r"|\bxox[abeoprs]-[0-9A-Za-z-]{10,}|\bxapp-[0-9A-Za-z-]{10,}|hooks\.slack\.com/services/[0-9A-Za-z/]+"  # Slack
+               ),
     re.compile(r"""((?:api_?key|password|passwd|pass|pwd|secret|token)\w*["']?\s*[:=]\s*["'])[^"'\s]{6,}(["'])""", re.I),
-    re.compile(r"((?:set\s+)?\w*(?:PASSWORD|KEY|TOKEN|SECRET)\w*=)[^\s\"']{6,}", re.I),
+    re.compile(r"((?:set\s+)?\w*(?:PASSWORD|PASSWD|PWD|KEY|TOKEN|SECRET)\w*=)[^\s\"']{6,}", re.I),
 ]
+# the password in postgres://user:password@host, keeping the rest of the address
+SECRET_IN_ADDRESS = re.compile(r"""(\b[a-z][a-z0-9+.-]*://[^\s:/@'"]*:)[^\s/@'"]+(@)""", re.I)
+
+
+def is_secret_name(path):
+    name = os.path.basename(path)
+    if SECRET_FILE.search(name):
+        return True
+    stem, ext = os.path.splitext(name)
+    words = re.split(r"[^a-z0-9]+", re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", stem).lower())
+    if SECRET_WORDS.intersection(words) or SECRET_PAIRS.intersection(zip(words, words[1:])):
+        return True
+    return bool(MAYBE_WORDS.intersection(words)) and ext.lower() not in CODE_FILES
+
+
+def note_skipped(paths):
+    """Write down each file left out for its name, once, so it's never left out without saying."""
+    try:
+        with open(SKIPPED_LOG, encoding="utf-8") as f:
+            known = set(f.read().splitlines())
+    except OSError:
+        known = set()
+    new = [p for p in paths if p not in known]
+    if new:
+        try:
+            with open(SKIPPED_LOG, "a", encoding="utf-8") as f:
+                f.write("".join(p + "\n" for p in new))
+        except OSError:
+            pass
 
 
 def redact(text):
+    text = SECRET_BLOCK.sub("<removed>", text)
+    text = SECRET_IN_ADDRESS.sub(r"\1<removed>\2", text)
     text = SECRET_VALUES[0].sub("<removed>", text)
     text = SECRET_VALUES[1].sub(r"\1<removed>\2", text)
     return SECRET_VALUES[2].sub(r"\1<removed>", text)
@@ -131,10 +177,12 @@ def track_file(files, tool, inp, ts):
 
 def file_rows(files, project, session):
     """The latest version of every file Claude wrote or edited in the chat: what's on disk now, or, for a file
-    deleted since, what the chat wrote. Binary, huge and secret-named files are left out."""
-    rows = []
+    deleted since, what the chat wrote. Binary, huge and secret-named files are left out; the secret-named ones
+    are listed in skipped_files.txt."""
+    rows, skipped = [], []
     for path, f in files.items():
-        if SECRET_NAME.search(os.path.basename(path)):
+        if is_secret_name(path):
+            skipped.append(path)
             continue
         text = f["text"]
         try:
@@ -148,6 +196,7 @@ def file_rows(files, project, session):
         rows.append((project, session, os.path.basename(path), "file", path,
                      os.path.splitext(path)[1].lstrip(".").lower() or None, redact(text), f["edits"],
                      f["first"], f["last"], "Claude Code"))
+    note_skipped(skipped)
     return rows
 
 
@@ -240,5 +289,8 @@ if __name__ == "__main__":
             cur.execute("SELECT (SELECT count(*) FROM messages), (SELECT count(*) FROM artifacts)")
             msgs, arts = cur.fetchone()
             print(f"{len(files)} chats looked at, {msgs} messages and {arts} files in the database")
+        if os.path.exists(SKIPPED_LOG):
+            with open(SKIPPED_LOG, encoding="utf-8") as f:
+                print(f"{len(f.read().splitlines())} files left out because their names look secret: see {SKIPPED_LOG}")
     elif len(sys.argv) > 1:
         save(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else None)
