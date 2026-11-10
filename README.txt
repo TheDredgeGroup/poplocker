@@ -68,6 +68,40 @@ TALK FROM AN ANDROID PHONE (same Wi-Fi)
 4. Hold the big mic button, talk, and let go. Your words get typed into the Claude chat that's open, and the
    reply is read on this PC.
 
+SMART HOME
+Say "Hey Home, turn the porch light off", or "Hey Home, make the office warmer and dimmer", or "Hey Home, every
+night at sunset turn on the porch light". Claude works the devices, and what it tells you is read back from the
+device itself, so "it's on" means it's on.
+- What it can work with nothing extra to install: Kasa plugs and bulbs (older firmware), WiZ, Shelly, Tasmota,
+  Philips Hue (through the bridge), WLED, Govee and Yeelight (turn on "LAN Control" for the light in its own
+  app first), and LIFX. They have to be on the same network as this PC. Lights that only work through their
+  maker's cloud app, like most Tuya / Smart Life ones and newer Kasa and Tapo ones, aren't supported yet.
+- To add your devices, say "Hey Home, look for new devices". It tells you what it found and asks what to call
+  each one. For Philips Hue, press the round button on the bridge first.
+- Rooms: "Hey Home, put the desk lamp in the office". Then "office lights off" works on the whole room.
+- Schedules: clock times, sunrise and sunset ("20 minutes before sunset"), every day, some days, or once. They
+  run from this PC even with the internet down. The first time you use sunrise or sunset it asks what town
+  you're in. A time that passes while the PC is off or asleep is skipped, not run late.
+- One-time sign-in: the home controller runs Claude Code's command line by itself, so home requests don't
+  land in whatever chat you have open. Open a terminal, run claude, type /login, and sign in. Until you do,
+  home requests are typed into the open Claude chat instead, and still work.
+- It uses the small, fast Claude model. To change it, add "home_model": "sonnet" to player_settings.json.
+  To change the wake word, add "home_wake": "Hey House".
+- From a phone, a sensor or anything that can send a web request: the same address and key as the iPhone
+  shortcut, but ending in /home instead of /say, with text = what you want. For example a motion sensor can
+  send "motion at the front door". Add wait = 60 to get Claude's answer back.
+- Your own devices (a TV, a projector, a garage door): anything a program on this PC can work can be a
+  device. In home\home.json, add to "devices":
+    {"name": "Projector", "type": "command", "room": "Den",
+     "actions": {"on": ["C:\\tools\\projector.exe", "on"], "off": ["C:\\tools\\projector.exe", "off"],
+                 "volume": ["C:\\tools\\projector.exe", "volume", "{value}"]}}
+  Each action is the program and its arguments; {value} is filled in with what was asked for. An action
+  called "status" is used to ask the device how it is. Only add programs you trust: the home controller can
+  be reached by anyone who has your phone key.
+- By hand: python poplocker_home.py list, scan, on "Desk Lamp", brightness "Desk Lamp" 40, schedules.
+- The home controller can only use these home tools. It can't read files, run other programs or browse.
+- Everything about your house stays in the home folder on this PC.
+
 MORE THAN ONE PC
 Claude runs on one PC, the main PC. A second PC that shows the chat through Remote Control can still be talked
 to and read the replies:

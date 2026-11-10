@@ -25,6 +25,7 @@ KEY_FILE = os.path.join(HERE, "ears_key.txt")
 PORT = 5055
 SETTINGS = os.path.join(HERE, "player_settings.json")
 DEFAULT_WAKE = "Hey Computer"
+DEFAULT_HOME_WAKE = "Hey Home"     # what's said after this goes to the home controller (lights, plugs, schedules)
 PHONE_MAX = 500          # characters of the answer sent back to the phone - the PC reads all of it
 RATE, FRAME = 16000, 480          # 30 ms frames
 # the "hey" is required: on its own, "Claude" turns up in normal talk and in replies being read out (a second PC heard
@@ -36,7 +37,7 @@ CLAUDE_WORDS = {"hey", "hi", "hay", "okay", "ok", "a", "yo", "claude", "cloud", 
 
 # the wake word is set in the window and saved in
 # player_settings.json; it's re-read whenever that file changes, so a new one works without a restart
-wake = {"phrase": None, "words": [], "mtime": None}
+wake = {"phrase": None, "words": [], "mtime": None, "home": DEFAULT_HOME_WAKE, "home_words": []}
 
 
 def wake_phrase():
@@ -48,11 +49,16 @@ def wake_phrase():
         wake["mtime"] = mtime
         try:
             with open(SETTINGS, encoding="utf-8") as f:
-                phrase = (json.load(f).get("wake") or "").strip()
-        except (OSError, ValueError):
-            phrase = ""
+                saved = json.load(f)
+            phrase, home = (saved.get("wake") or "").strip(), (saved.get("home_wake") or "").strip()
+        except (OSError, ValueError, AttributeError):
+            phrase, home = "", ""
         wake["phrase"] = phrase or DEFAULT_WAKE
         wake["words"] = re.sub(r"[^a-z0-9' ]", " ", wake["phrase"].lower()).split()
+        wake["home"] = home or DEFAULT_HOME_WAKE
+        wake["home_words"] = re.sub(r"[^a-z0-9' ]", " ", wake["home"].lower()).split()
+        if wake["home_words"] == wake["words"]:
+            wake["home_words"] = []          # the same words can't mean two places: the main wake word wins
     return wake["phrase"]
 
 
@@ -64,7 +70,7 @@ def hint():
     """Whisper's hint: it expects the wake word and the reader commands (without it "Hey Claude, pause" came out
     as "Hey Court Pools")."""
     p = wake_phrase()
-    return f"{p}, pause. {p}, skip. {p}, stop."
+    return f"{p}, pause. {p}, skip. {p}, stop." + (f" {wake['home']}, lights off." if wake["home_words"] else "")
 
 
 GREETINGS = {"hey", "hi", "hay", "okay", "ok", "a", "yo", "hello"}
@@ -82,15 +88,28 @@ def wake_match(text):
     if is_default_wake():
         m = CLAUDE_WAKE.match(text)
         return m.group(1).strip() if m else None
+    return _after(text, wake["words"])
+
+
+def _after(text, want):
     heard = re.findall(r"[a-z0-9']+", text.lower())
-    want = wake["words"]
-    if len(heard) < len(want):
+    if not want or len(heard) < len(want):
         return None
     if not all(alike(h, w) for h, w in zip(heard, want)):
         return None
     # cut the text after the last wake word, keeping its original wording
     m = re.match(r"^\W*" + r"\W+".join(r"[a-z0-9']+" for _ in want) + r"\b\W*(.*)$", text, re.I | re.S)
     return m.group(1).strip() if m else ""
+
+
+def home_match(text):
+    """What was said after the home wake word ("Hey Home, porch light off"), or None."""
+    wake_phrase()
+    if re.match(r"\W*a\b", text, re.I) and wake["home_words"][:1] != ["a"]:
+        return None        # "a home..." starts too many ordinary sentences (Whisper's "a" for "hey" isn't taken here)
+    return _after(text, wake["home_words"])
+
+
 def _words(s):
     return re.sub(r"[^a-z' ]+", " ", s.lower()).split()
 
@@ -417,6 +436,39 @@ def handle_words(said, from_phone=False):
     return problem
 
 
+# ---- the home controller ----------------------------------------------------------------------------------------
+# What's said after the home wake word, sent to the door's /home, or set off by a schedule goes to a Claude that
+# runs by itself with only the home tools (poplocker_home.py) - not into whatever chat happens to be open.
+def home_ask(words, source="voice"):
+    """-> Claude's short answer (it's also read out loud here)."""
+    words = words.strip()
+    status(f"\U0001f3e0 {words[:60]}")
+    try:
+        import poplocker_home_ask
+        answer = poplocker_home_ask.ask(words, source)
+        status(f"\U0001f3e0 {answer[:70]}")
+        return answer
+    except Exception as e:
+        # Claude's command line isn't signed in (or isn't there): the open Claude chat does it instead
+        log(f"home: {e}")
+        tool = os.path.join(HERE, "poplocker_home.py")
+        problem = send_to_claude(f'Home controller request - use the home tools (python "{tool}" help): {words}')
+        status(f"⚠ {problem}" if problem else f"→ Sent: {words[:60]}")
+        if not problem:
+            threading.Thread(target=claim_replies, daemon=True).start()
+        return problem or "Sent to Claude."
+
+
+def start_schedule():
+    """Things saved to happen at a time (lights off at 23:00, porch light at sunset) are run from here."""
+    try:
+        import poplocker_home
+    except ImportError:
+        return
+    threading.Thread(target=poplocker_home.run_scheduler, kwargs={"ask": lambda words: home_ask(words, "a schedule")},
+                     daemon=True).start()
+
+
 # ---- the iPhone door ------------------------------------------------------------------------------------------
 def key_is_right(given):
     return isinstance(given, str) and hmac.compare_digest(given.encode("utf-8"), KEY.encode("utf-8"))
@@ -468,7 +520,7 @@ class Door(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = self.path.split("?")[0]
-        if path not in ("/say", "/route", "/read"):
+        if path not in ("/say", "/home", "/route", "/read"):
             return self._answer(404, {"response": "Not here."})
         ip = self.client_address[0]
         if locked_out(ip):
@@ -494,6 +546,21 @@ class Door(BaseHTTPRequestHandler):
             return self._answer(403, {"response": "Wrong key."})
         with wrong_lock:
             wrong_keys.pop(ip, None)
+        if path == "/home":       # a phone, sensor or timer: straight to the home controller
+            text = str(data.get("text") or "").strip()
+            if not text:
+                return self._answer(200, {"response": "I didn't hear anything."})
+            self.log_message("POST /home from=%s", str(data.get("from") or "")[:40])
+            source = "the door" + (f" ({str(data['from'])[:40]})" if data.get("from") else "")
+            box = []
+            worker = threading.Thread(target=lambda: box.append(home_ask(text, source)), daemon=True)
+            worker.start()
+            # answered at once, like /say; {"wait": seconds} waits for what the controller said
+            try:
+                worker.join(min(float(data.get("wait") or 0), 110))
+            except (TypeError, ValueError):
+                pass
+            return self._answer(200, {"response": (box[0] if box else "Sent to the home controller.")[:PHONE_MAX]})
         if path != "/say":
             if path == "/route":      # another PC: "read Claude's replies over here"
                 with open(ROUTE_FILE, "w") as f:
@@ -549,13 +616,15 @@ def mic_loop():
     def transcribe(audio):
         # the hint makes it expect the wake word and reader commands - without it "Hey Claude, pause" came out
         # "A-Claud Pause" / "Hey Court Pools" (tested 2026-10-29); ordinary speech isn't changed by it
-        segments, _ = model.transcribe(audio, language="en", beam_size=1, hotwords=wake_phrase(),
+        segments, _ = model.transcribe(audio, language="en", beam_size=1,
+                                       hotwords=wake_phrase() + (", " + wake["home"] if wake["home_words"] else ""),
                                        initial_prompt=hint())
         return "".join(s.text for s in segments).strip()
     pa = pyaudio.PyAudio()
     stream = pa.open(format=pyaudio.paInt16, channels=1, rate=RATE, input=True, frames_per_buffer=FRAME)
     floor, voiced, silent, frames = 200.0, 0, 0, []
     expecting = False      # heard "Hey Claude" on its own - the next thing said (within 10 s) is the message
+    for_home = False       # ...and that wake word was the home one
     idle_shown = None
     while True:
         talk_now = os.path.exists(os.path.join(HERE, "talk_now"))
@@ -601,13 +670,25 @@ def mic_loop():
                 except OSError:
                     pass
                 expecting = False
+                if for_home and not talk_now:
+                    for_home = False
+                    rest = home_match(text)
+                    threading.Thread(target=home_ask, args=(rest or text,), daemon=True).start()
+                    continue
+                for_home = False
                 rest = wake_match(text)
                 handle_words(text if rest is None else rest)
                 continue
-            rest = wake_match(text)
+            rest, for_home = wake_match(text), False
+            if rest is None:
+                rest, for_home = home_match(text), True
             if rest is None or echo_of_reply(text):
+                for_home = False
                 continue                 # not for Claude (or it's the reader talking)
-            if rest:
+            if rest and for_home:
+                for_home = False
+                threading.Thread(target=home_ask, args=(rest,), daemon=True).start()
+            elif rest:
                 handle_words(rest)
             else:
                 expecting = time.time() + 10
@@ -617,6 +698,7 @@ def mic_loop():
 
 
 threading.Thread(target=serve, daemon=True).start()
+start_schedule()
 try:
     mic_loop()
 except Exception as e:     # no mic / no Whisper - the iPhone door still works

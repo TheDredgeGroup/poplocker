@@ -13,6 +13,9 @@ PopLocker is a companion for Claude Code on Windows. It isn't made by or affilia
 - **Talk back by voice.** Say "Hey Computer, ..." (you can change the wake word) or press Talk, and your words are
   typed into the open Claude Code chat.
 - **Talk from your phone.** iPhone through a Siri Shortcut, or Android with the NuePost app in this repo.
+- **Runs your smart home.** Say "Hey Home, turn the porch light off" and Claude does it, then tells you what
+  really happened. Lights and plugs on your own network (Kasa, WiZ, Shelly, Tasmota, Philips Hue, WLED, Govee,
+  Yeelight, LIFX), plus anything a program on your PC can work. Schedules by the clock or by sunrise and sunset.
 - **Every chat, project and file saved on your PC.** Each chat, and the latest version of every file Claude writes
   or edits, goes into your own PostgreSQL database, filed under its project. Search by keyword, date or project.
   Passwords and keys in the code are blanked out first. Nothing leaves your PC.
@@ -31,6 +34,8 @@ The full instructions are in [README.txt](README.txt).
 |------|------------|
 | `claude_voice_player.pyw` | The reader window |
 | `claude_voice_ears.py` | Wake word, Talk button, and the phone door on port 5055 |
+| `poplocker_home.py` | The smart home tools: devices, schedules, and the tool server Claude uses |
+| `poplocker_home_ask.py` | Hands a home request to Claude, limited to the home tools |
 | `claude_voice_hook.py` | Claude Code Stop hook: picks out the readable parts of each reply |
 | `claude_chat_save.py` | Saves the chats to the database |
 | `chat_search.pyw` | The History search window |
