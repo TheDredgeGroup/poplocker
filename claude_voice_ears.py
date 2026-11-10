@@ -445,6 +445,8 @@ def home_ask(words, source="voice"):
     status(f"\U0001f3e0 {words[:60]}")
     try:
         import poplocker_home_ask
+        if str(poplocker_home_ask.setting("home_to")).lower() == "chat":
+            raise RuntimeError("home_to is chat: sent to the open chat")
         answer = poplocker_home_ask.ask(words, source)
         status(f"\U0001f3e0 {answer[:70]}")
         return answer

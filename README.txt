@@ -87,6 +87,8 @@ device itself, so "it's on" means it's on.
   home requests are typed into the open Claude chat instead, and still work.
 - It uses the small, fast Claude model. To change it, add "home_model": "sonnet" to player_settings.json.
   To change the wake word, add "home_wake": "Hey House".
+  To send home requests to the open Claude chat every time, and never run Claude by itself, add
+  "home_to": "chat".
 - From a phone, a sensor or anything that can send a web request: the same address and key as the iPhone
   shortcut, but ending in /home instead of /say, with text = what you want. For example a motion sensor can
   send "motion at the front door". Add wait = 60 to get Claude's answer back.
