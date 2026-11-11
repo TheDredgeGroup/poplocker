@@ -45,20 +45,20 @@ THE WINDOW
 - Say "<wake word>, pause / skip / back / stop / play" to work the reader by voice.
 
 TALK FROM YOUR iPHONE (the iPhone has to be on the same Wi-Fi)
-Setup puts your address and private key in "iPhone address.txt". In the Shortcuts app, make a shortcut
-called "Tell Pop Locker" with these 4 actions:
-1. Dictate Text. Stop Listening: After Pause.
-2. Get Contents of URL. Use the URL from "iPhone address.txt". Then:
-   - Method: POST;
-   - Headers: add one called X-Key, and paste the key from "iPhone address.txt" as its value;
-   - Request Body: JSON;
-   - add one Text field: text = Dictated Text.
-3. Get Dictionary Value. Get: Value, for Key: response, in: Contents of URL.
-4. Speak Text. Text: Dictionary Value.
-Then say "Hey Siri, Tell Pop Locker" and talk. Your words get typed into the Claude chat that's open. The reply
-is read on this PC.
-Keep the key private: anyone on your Wi-Fi who has it can type to Claude. The phone talks to the PC over plain
-HTTP, so only use this on a Wi-Fi network you trust. Five wrong keys shut that device out for 15 minutes.
+Open "iPhone setup.html" in this folder: it shows every step with pictures. In short:
+1. Setup puts your shortcut line in "iPhone address.txt" (the second line, ending in text=). Get it onto the
+   iPhone, for example by emailing it to yourself.
+2. In the Shortcuts app, tap +, then add these 4 actions, in this order:
+   - Dictate Text
+   - URL Encode
+   - Get Contents of URL: tap its blue word, tap Clear, paste your shortcut line, then with the cursor at the
+     very end tap "URL Encoded Text" above the keyboard
+   - Speak Text
+3. Name it Pop Locker, then press and hold it and choose Share > Add to Home Screen.
+Tap the button and talk. Your words get typed into the Claude chat that's open, and the reply is read on this PC.
+Keep the line private: it has your key in it, and anyone on your Wi-Fi who has it can type to Claude. The phone
+talks to the PC over plain HTTP, so only use this on a Wi-Fi network you trust. Five wrong keys shut that device
+out for 15 minutes.
 
 TALK FROM AN ANDROID PHONE (same Wi-Fi)
 1. Copy Android\NuePost.apk from this folder to the phone and open it. Android asks you to allow installs

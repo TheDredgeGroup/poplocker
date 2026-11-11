@@ -106,7 +106,7 @@ if ($old -or -not (Test-Path "$D\ears_key.txt")) {
 $k = (Get-Content "$D\ears_key.txt" -Raw).Trim()
 $ip = (Get-NetIPAddress -AddressFamily IPv4 | ? { $_.IPAddress -like '192.168.*' -or $_.IPAddress -like '10.*' } | select -First 1).IPAddress
 $url = "http://${ip}:5055/say"
-Set-Content "$D\iPhone address.txt" "iPhone shortcut, in the Get Contents of URL step (POST, JSON field: text):`r`n  URL: $url`r`n  Headers: add X-Key, with the key below as its value`r`n`r`nNuePost on Android, in Settings:`r`n  Endpoint URL: $url`r`n  JSON Key: text`r`n  Access Key: the key below`r`n`r`nKey (keep it private: anyone who has it and is on your Wi-Fi can type to Claude):`r`n$k" -Encoding utf8
+Set-Content "$D\iPhone address.txt" "iPhone shortcut: copy this whole line into the shortcut's Get Contents of URL step (pictures: iPhone setup.html):`r`n${url}?key=$k&text=`r`n`r`nNuePost on Android, in Settings:`r`n  Endpoint URL: $url`r`n  JSON Key: text`r`n  Access Key: the key below`r`n`r`nKey (keep it private: anyone who has it and is on your Wi-Fi can type to Claude):`r`n$k" -Encoding utf8
 Write-Host "      Phone address and private key are in:" -ForegroundColor Cyan
 Write-Host "      $D\iPhone address.txt" -ForegroundColor Yellow
 Write-Host ""

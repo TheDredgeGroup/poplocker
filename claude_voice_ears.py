@@ -510,14 +510,24 @@ class Door(BaseHTTPRequestHandler):
             pass
 
     def _answer(self, code, obj):
-        body = json.dumps(obj).encode("utf-8")
+        if getattr(self, "_plain", False):     # a plain web address (GET): answer in words the phone can speak
+            body = str(obj.get("response") or obj.get("status") or "").encode("utf-8")
+            ctype = "text/plain; charset=utf-8"
+        else:
+            body = json.dumps(obj).encode("utf-8")
+            ctype = "application/json"
         self.send_response(code)
-        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
     def do_GET(self):
+        # the simplest iPhone shortcut is one web address with everything in it:
+        #   http://<PC>:5055/say?key=<key>&text=<URL Encoded Text>   (no Method, Headers or Request Body to find)
+        if self.path.split("?")[0] in ("/say", "/home") and "?" in self.path:
+            self._plain = True
+            return self.do_POST()
         self._answer(200, {"status": "Claude's ears are on"})
 
     def do_POST(self):
@@ -536,10 +546,11 @@ class Door(BaseHTTPRequestHandler):
             data = {}
         if not isinstance(data, dict):
             data = {}
-        given = self.headers.get("X-Key") or data.get("key")
-        if not given and re.search(r"[?&]key=", self.path):   # never checked, so it's no way to guess, and not a wrong key
-            self.log_message("refused: key in the address")
-            return self._answer(403, {"response": "Put the key in the X-Key header, not the address."})
+        from urllib.parse import parse_qs, urlsplit
+        for k, v in parse_qs(urlsplit(self.path).query).items():   # fields in the address fill in what the body lacks
+            if k in ("key", "text", "wait", "from") and k not in data:
+                data[k] = v[0]
+        given = self.headers.get("X-Key") or data.get("key")     # header, JSON body, or the address
         if not key_is_right(given):
             self.log_message("wrong key on %s", path)
             if note_wrong_key(ip):
