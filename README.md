@@ -13,8 +13,8 @@ PopLocker is a companion for Claude Code on Windows. It isn't made by or affilia
 - **Talk back by voice.** Say "Hey Computer, ..." (you can change the wake word) or press Talk, and your words are
   typed into the open Claude Code chat.
 - **Talk from your phone.** iPhone through a Siri Shortcut, or Android with the NuePost app in this repo.
-- **Runs your smart home.** Say "Hey Home, turn the porch light off" and Claude does it, then tells you what
-  really happened. Lights and plugs on your own network (Kasa, WiZ, Shelly, Tasmota, Philips Hue, WLED, Govee,
+- **Smart home features, if you want them.** Say "Hey Home, turn the porch light off" and Claude does it, then
+  tells you what really happened. Lights and plugs on your own network (Kasa, WiZ, Shelly, Tasmota, Philips Hue, WLED, Govee,
   Yeelight, LIFX), plus anything a program on your PC can work. Schedules by the clock or by sunrise and sunset.
 - **Every chat, project and file saved on your PC.** Each chat, and the latest version of every file Claude writes
   or edits, goes into your own PostgreSQL database, filed under its project. Search by keyword, date or project.

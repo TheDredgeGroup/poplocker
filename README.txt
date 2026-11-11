@@ -68,7 +68,7 @@ TALK FROM AN ANDROID PHONE (same Wi-Fi)
 4. Hold the big mic button, talk, and let go. Your words get typed into the Claude chat that's open, and the
    reply is read on this PC.
 
-SMART HOME
+SMART HOME FEATURES (optional: only if you want them)
 Say "Hey Home, turn the porch light off", or "Hey Home, make the office warmer and dimmer", or "Hey Home, every
 night at sunset turn on the porch light". Claude works the devices, and what it tells you is read back from the
 device itself, so "it's on" means it's on.
