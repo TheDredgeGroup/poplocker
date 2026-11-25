@@ -5,7 +5,7 @@ commands or symbols - splits it into paragraphs, and starts the player window (c
 its Skip paragraph / Stop buttons. Returns at once so Claude is never held up.
 Off switch: a file named OFF in this folder (or tell Claude "voice off").
 """
-import json, os, re, subprocess, sys
+import json, os, re, subprocess, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PLAYER = os.path.join(HERE, "claude_voice_player.pyw")
@@ -124,7 +124,14 @@ def main():
     if not path or not os.path.exists(path):
         return
     save_chat(path, data.get("cwd"))
-    paras = speakable(last_reply(path))
+    # the hook can fire ~0.1 s after the reply, before its last text block is written to the transcript;
+    # an empty read then skipped the reply silently, so retry for up to 3 s
+    paras = []
+    for _ in range(12):
+        paras = speakable(last_reply(path))
+        if paras:
+            break
+        time.sleep(0.25)
     if not paras:
         return
     # the player window stays open and picks up the new reply by itself (it watches TEXT_FILE)

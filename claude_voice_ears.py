@@ -221,6 +221,34 @@ def _ask_prompt_box(h):
     return None
 
 
+def _focus_prompt(h, seconds=3):
+    """Give Claude's message box the keyboard focus without clicking (for when something covers it). -> bool"""
+    done = []
+
+    def run():
+        try:
+            import comtypes
+            comtypes.CoInitialize()
+        except Exception:
+            pass
+        try:
+            from pywinauto import Desktop
+            win = Desktop(backend="uia").window(handle=h)
+            for e in win.descendants(control_type="Edit"):
+                if (e.element_info.name or "") == "Prompt":
+                    e.set_focus()
+                    done.append(True)
+                    return
+        except Exception as ex:
+            log(f"send: couldn't focus the message box ({ex})")
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    t.join(seconds)
+    if done:
+        time.sleep(0.2)
+    return bool(done)
+
+
 def _click_message_box(h):
     """Click inside the chat's message box, so the paste can't land on another control (it sometimes
     hit the "New" chat button). The box sits centred low in the window: ~47% across, ~70 px (at 100%
@@ -320,6 +348,8 @@ def send_to_claude(text):
 
 
 def _send(text):
+    before = user32.GetForegroundWindow()   # given back after sending (a full-screen video there drops
+                                           # behind while Claude's window is the active one)
     h = _claude_window()
     if not h:
         return "The Claude app isn't open."
@@ -332,11 +362,20 @@ def _send(text):
     if user32.GetForegroundWindow() != h:
         return "Couldn't bring the Claude window to the front."
     if not _click_message_box(h):
-        return "Something's covering Claude's message box - nothing was sent."
+        # something that stays on top (e.g. a full-screen video on every screen) is over the box: put the typing
+        # cursor in it through the accessibility tree instead of a click. The Claude window is the foreground
+        # window, so the paste and Enter still go to it even though it can't be seen.
+        if not _focus_prompt(h):
+            return "Something's covering Claude's message box - nothing was sent."
+        log("send: message box covered - focused it without a click")
     _set_clipboard(text)
     _key(VK_CONTROL); _key(VK_V); _key(VK_V, True); _key(VK_CONTROL, True)
     time.sleep(0.3)
     _key(VK_RETURN); _key(VK_RETURN, True)
+    if before and before != h and user32.IsWindow(before):
+        time.sleep(0.6)
+        _key(VK_MENU); _key(VK_MENU, True)
+        user32.SetForegroundWindow(before)
     return ""
 
 
