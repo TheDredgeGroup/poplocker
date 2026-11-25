@@ -76,6 +76,10 @@ device itself, so "it's on" means it's on.
   Philips Hue (through the bridge), WLED, Govee and Yeelight (turn on "LAN Control" for the light in its own
   app first), and LIFX. They have to be on the same network as this PC. Lights that only work through their
   maker's cloud app, like most Tuya / Smart Life ones and newer Kasa and Tapo ones, aren't supported yet.
+- Zigbee plugs, with a Zigbee USB dongle that has a Silicon Labs chip (SONOFF Dongle Plus MG24, SONOFF
+  ZBDongle-E, Home Assistant SkyConnect). Plug the dongle in; if Device Manager shows it with a yellow sign,
+  right-click it > Update driver > Search automatically. Then say "Hey Home, pair a Zigbee device" and hold
+  the plug's button until its light blinks. Tested with the Aqara Smart Plug (US), which also reports its watts.
 - To add your devices, say "Hey Home, look for new devices". It tells you what it found and asks what to call
   each one. For Philips Hue, press the round button on the bridge first.
 - Rooms: "Hey Home, put the desk lamp in the office". Then "office lights off" works on the whole room.

@@ -2,11 +2,12 @@
 
 Lights, plugs and switches that can be reached on the home network, with nothing extra to install:
 Kasa (older firmware), WiZ, Shelly, Tasmota, Philips Hue, WLED, Govee (LAN control on), Yeelight (LAN control on)
-and LIFX. Anything else - a TV, a projector, a garage door - can be added as a "command" device: a name for
+and LIFX. Zigbee plugs too, through a Zigbee USB dongle (see poplocker_zigbee.py). Anything else - a TV, a projector, a garage door - can be added as a "command" device: a name for
 each thing it can do and the program to run for it.
 
 Three ways in, all doing the same things:
   python poplocker_home.py list | scan | on <name> | off <name> | brightness <name> 40 | color <name> red | ...
+  python poplocker_home.py zigbee_pair         let a new Zigbee device join (hold its button until it blinks)
   python poplocker_home.py --mcp        the same tools for Claude (an MCP server on stdin/stdout)
   the schedule: steps saved with a time ("23:00", "sunset-20") run by themselves from the ears
 
@@ -21,7 +22,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 HOME_DIR = os.path.join(HERE, "home")
 HOME_FILE = os.path.join(HOME_DIR, "home.json")
 LOG_FILE = os.path.join(HOME_DIR, "home.log")
-TYPES = ("kasa", "wiz", "shelly", "tasmota", "hue", "wled", "govee", "yeelight", "lifx", "command")
+TYPES = ("kasa", "wiz", "shelly", "tasmota", "hue", "wled", "govee", "yeelight", "lifx", "zigbee", "command")
 LIGHT_ACTIONS = ("on", "off", "toggle", "brightness", "color", "temperature", "status")
 COLORS = {"red": "#ff0000", "green": "#00ff00", "blue": "#0000ff", "white": "#ffffff", "yellow": "#ffff00",
           "orange": "#ff7f00", "purple": "#8000ff", "pink": "#ff40a0", "cyan": "#00ffff", "magenta": "#ff00ff",
@@ -599,10 +600,108 @@ def lifx_change(dev, on, brightness, rgb, kelvin):
         udp_tell(dev["ip"], 56700, _lifx_packet(117, struct.pack("<HI", 65535 if on else 0, 300)))
 
 
+# ---- Zigbee, through the Zigbee helper (poplocker_zigbee.py, which keeps the USB dongle connected) -------------
+ZIGBEE_URL = "http://127.0.0.1:5056"
+IEEE = re.compile(r"[0-9a-f]{2}(:[0-9a-f]{2}){7}", re.I)
+
+
+def _zigbee_python():
+    """The helper needs the zigpy + bellows modules: a "zigbee_py" Python next to this file, or Pop Locker's own."""
+    for folder in ("zigbee_py\\Scripts", "python", "zigbee_py/bin"):
+        for exe in ("pythonw.exe", "python.exe", "python3"):
+            p = os.path.join(HERE, folder, exe)
+            if os.path.isfile(p):
+                return p
+    return sys.executable
+
+
+def _zigbee(path, body=None, timeout=40, start=True):
+    url = ZIGBEE_URL + path
+    for _ in range(30):                    # while the helper says it is still connecting to the dongle
+        try:
+            return _zigbee_once(url, body, timeout, start)
+        except HomeError as e:
+            if not str(e).startswith("starting"):
+                raise
+            start = False
+            time.sleep(2)
+    raise HomeError("the Zigbee dongle is taking too long to connect")
+
+
+def _zigbee_once(url, body, timeout, start):
+    for attempt in range(2):
+        try:
+            req = urllib.request.Request(url, data=None if body is None else json.dumps(body).encode(),
+                                         headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return json.loads(r.read() or b"{}")
+        except urllib.error.HTTPError as e:
+            try:
+                why = json.loads(e.read()).get("error")
+            except (ValueError, OSError):
+                why = None
+            raise HomeError(why or f"the Zigbee helper said {e.code}")
+        except (urllib.error.URLError, OSError) as e:
+            if attempt or not start:
+                raise HomeError(f"the Zigbee helper isn't running ({getattr(e, 'reason', e)})")
+        # not running: start it once, then wait for it to answer
+        subprocess.Popen([_zigbee_python(), os.path.join(HERE, "poplocker_zigbee.py")], cwd=HERE,
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         creationflags=(0x00000008 | 0x08000000) if os.name == "nt" else 0)   # detached, no window
+        log("started the Zigbee helper")
+        for _ in range(60):
+            time.sleep(1)
+            try:
+                urllib.request.urlopen(ZIGBEE_URL + "/devices", timeout=3).close()
+                break
+            except urllib.error.HTTPError:
+                break                       # it answers (with a problem the next call will report)
+            except (urllib.error.URLError, OSError):
+                continue
+        else:
+            raise HomeError("the Zigbee helper didn't start. Is the Zigbee dongle plugged in?")
+
+
+def zigbee_state(dev):
+    r = _zigbee("/state", {"ieee": dev["ieee"]})
+    st = {"on": bool(r.get("on"))}
+    if r.get("power") is not None:
+        st["power"] = r["power"]
+    return st
+
+
+def zigbee_change(dev, on, brightness, rgb, kelvin):
+    if brightness is not None or rgb is not None or kelvin is not None:
+        raise HomeError("it's a plug: it can do on, off, toggle and status")
+    if on is not None:
+        _zigbee("/set", {"ieee": dev["ieee"], "on": bool(on)})
+
+
+def zigbee_pair(seconds=120, name="", room=""):
+    """Open the Zigbee network so a new device can join; if one joins and a name was given, save it."""
+    r = _zigbee("/pair", {"seconds": int(seconds or 120)}, timeout=int(seconds or 120) + 60)
+    joined = [d for d in r.get("joined", []) if IEEE.fullmatch(d.get("ieee", ""))]
+    if not joined:
+        return (f"Nothing joined in {int(seconds or 120)} seconds. Hold the device's button until its light blinks "
+                "(usually 5 to 10 seconds), and try again.")
+    lines = []
+    for d in joined:
+        what = d.get("what") or f"{d.get('maker') or ''} {d.get('model') or ''}".strip()
+        saved = next((x for x in load()["devices"] if x.get("ieee", "").lower() == d["ieee"].lower()), None)
+        if saved:
+            lines.append(f'{what} joined again; it is already saved as "{saved["name"]}".')
+        elif name and len(joined) == 1:
+            lines.append(add_device(name, "zigbee", room=room, ieee=d["ieee"]))
+        else:
+            lines.append(f"{what} joined (zigbee {d['ieee']}, can do {d.get('can')}). Ask what to call it, then add_device "
+                         f"with kind zigbee and that ieee.")
+    return "\n".join(lines)
+
+
 DRIVERS = {"kasa": (kasa_state, kasa_change), "wiz": (wiz_state, wiz_change), "shelly": (shelly_state, shelly_change),
            "tasmota": (tasmota_state, tasmota_change), "hue": (hue_state, hue_change), "wled": (wled_state, wled_change),
            "govee": (govee_state, govee_change), "yeelight": (yeelight_state, yeelight_change),
-           "lifx": (lifx_state, lifx_change)}
+           "lifx": (lifx_state, lifx_change), "zigbee": (zigbee_state, zigbee_change)}
 
 
 # ---- "command" devices: anything a program on this PC can work --------------------------------------------------
@@ -647,6 +746,8 @@ def describe(st):
         parts.append(st["color"])
     if st.get("on") and st.get("temperature"):
         parts.append(f"{st['temperature']}K")
+    if st.get("power") is not None:
+        parts.append(f"using {st['power']} W")
     return " ".join(parts)
 
 
@@ -777,16 +878,21 @@ def _free_name(data, name):
     return name
 
 
-def add_device(name, kind, ip="", room="", light="", key="", channel=None, child=""):
+def add_device(name, kind, ip="", room="", light="", key="", channel=None, child="", ieee=""):
     kind = str(kind).strip().lower()
     if kind == "command":
         raise HomeError('A "command" device runs a program on this PC, so it is added by hand: put it in home/home.json '
                         '(see the README) or ask Claude in the normal Claude Code chat to add it.')
     if kind not in DRIVERS:
         raise HomeError(f"The kinds are: {', '.join(DRIVERS)}.")
-    if not re.fullmatch(r"\d{1,3}(\.\d{1,3}){3}", str(ip).strip()):
+    if kind == "zigbee":
+        if not IEEE.fullmatch(str(ieee or ip).strip()):
+            raise HomeError("A Zigbee device needs its ieee address from zigbee_pair or scan, like 00:15:8d:00:8c:7c:16:4b.")
+        dev = {"name": str(name).strip(), "type": kind, "ieee": str(ieee or ip).strip().lower()}
+    elif not re.fullmatch(r"\d{1,3}(\.\d{1,3}){3}", str(ip).strip()):
         raise HomeError("It needs the device's address on the home network, like 192.168.1.50.")
-    dev = {"name": str(name).strip(), "type": kind, "ip": str(ip).strip()}
+    else:
+        dev = {"name": str(name).strip(), "type": kind, "ip": str(ip).strip()}
     if not dev["name"]:
         raise HomeError("It needs a name.")
     if room:
@@ -805,7 +911,7 @@ def add_device(name, kind, ip="", room="", light="", key="", channel=None, child
             raise HomeError(f'There is already a device called "{dev["name"]}".')
         data["devices"].append(dev)
         save(data)
-    log(f"added {dev['name']} ({kind} {dev['ip']})")
+    log(f"added {dev['name']} ({kind} {dev.get('ip') or dev.get('ieee')})")
     try:
         return f'Added "{dev["name"]}". It answers: {describe(read_state(dev))}.'
     except HomeError as e:
@@ -997,20 +1103,36 @@ def scan():
         for j in jobs:
             j.result()
     kasa_new()
+    zigbee_note = ""
+    try:
+        import poplocker_zigbee
+        if poplocker_zigbee.find_dongle()[0]:
+            saved_ieee = {d.get("ieee", "").lower() for d in load()["devices"] if d["type"] == "zigbee"}
+            for d in _zigbee("/devices").get("devices", []):
+                if d["ieee"].lower() not in saved_ieee:
+                    what = d.get("what") or f"{d.get('maker') or ''} {d.get('model') or ''}".strip()
+                    note("zigbee", d["ieee"], f"{what}, can do {d.get('can')} (add it with kind zigbee and this ieee)")
+    except HomeError as e:
+        zigbee_note = f"\nZigbee: {e}"
+    except ImportError:
+        pass
     saved = {(d["type"], d.get("ip"), d.get("child", "")) for d in load()["devices"]}
     hue_saved = {d.get("ip") for d in load()["devices"] if d["type"] == "hue"}
     new, old = [], 0
-    for (kind, ip, child), what in sorted(found.items(), key=lambda kv: tuple(int(p) for p in kv[0][1].split("."))):
+    def order(kv):
+        kind, ip, _ = kv[0]
+        return (1, (), ip) if kind == "zigbee" else (0, tuple(int(p) for p in ip.split(".")), "")
+    for (kind, ip, child), what in sorted(found.items(), key=order):
         if (kind, ip, child) in saved or (kind == "hue-bridge" and ip in hue_saved):
             old += 1
             continue
         extra = f", child {child}" if child else ""
-        new.append(f"{kind} at {ip}{extra}: {what}")
+        new.append(f"zigbee {ip}: {what}" if kind == "zigbee" else f"{kind} at {ip}{extra}: {what}")
     head = f"Found {len(new)} new device{'s' if len(new) != 1 else ''}" + (f" ({old} already saved)" if old else "") + "."
     if not new:
         head += (" Nothing that Pop Locker can work answered on this network. Lights that only work through their "
                  "maker's cloud app (most Tuya / Smart Life ones) don't answer here.")
-    return "\n".join([head] + new)
+    return "\n".join([head] + new) + zigbee_note
 
 
 # ---- the schedule -----------------------------------------------------------------------------------------------
@@ -1223,8 +1345,18 @@ def run_schedule(s, ask=None):
     return "\n".join(out)
 
 
+def zigbee_warm():
+    """When a Zigbee device is saved, start the Zigbee helper now, so the first "Hey Home" doesn't wait for the dongle."""
+    try:
+        if any(d["type"] == "zigbee" for d in load()["devices"]):
+            _zigbee("/devices", timeout=10)
+    except (HomeError, OSError, ValueError) as e:
+        log(f"zigbee at start: {e}")
+
+
 def run_scheduler(ask=None, stop=None):
     """Runs for ever (in the ears): every 20 seconds, does what's due."""
+    threading.Thread(target=zigbee_warm, daemon=True).start()
     while not (stop and stop.is_set()):
         try:
             for s in due_schedules():
@@ -1255,10 +1387,14 @@ TOOLS = [
     _tool("scan", "Look on the home network for lights, plugs and bridges that aren't saved yet. Changes nothing. Takes "
           "about five seconds."),
     _tool("add_device", "Save a device that scan found (or whose address the person gives), under a name the person will "
-          "say. Kinds: kasa, wiz, shelly, tasmota, wled, govee, yeelight, lifx. Hue lights are added with hue_pair instead.",
-          {"name": S, "kind": S, "ip": S, "room": S, "channel": {"type": "integer", "description": "For a device with several "
+          "say. Kinds: kasa, wiz, shelly, tasmota, wled, govee, yeelight, lifx, zigbee. Hue lights are added with hue_pair "
+          "instead. A zigbee device takes its ieee (from zigbee_pair or scan) instead of an ip.",
+          {"name": S, "kind": S, "ip": S, "ieee": S, "room": S, "channel": {"type": "integer", "description": "For a device with several "
            "switches: which one (Shelly counts from 0, Tasmota from 1)"}, "child": {"type": "string", "description": "For "
-           "one socket of a Kasa power strip: the child id scan showed"}}, ["name", "kind", "ip"]),
+           "one socket of a Kasa power strip: the child id scan showed"}}, ["name", "kind"]),
+    _tool("zigbee_pair", "Let a new Zigbee device (plug, switch) join the Zigbee USB dongle. Tell the person to hold the "
+          "device's button until its light blinks; this waits up to `seconds` (default 120) for it. Give `name` (and `room`) "
+          "to save it straight away when one device joins.", {"seconds": N, "name": S, "room": S}),
     _tool("hue_pair", "Connect to a Philips Hue bridge and add all its lights. The person must press the round button on "
           "the bridge first (within the last 30 seconds).", {"bridge_ip": S, "room": S}, ["bridge_ip"]),
     _tool("change_device", "Rename a device or put it in a room (room \"\" takes it out of its room).",
@@ -1289,7 +1425,9 @@ def call_tool(name, a):
         return scan()
     if name == "add_device":
         return add_device(a["name"], a["kind"], a.get("ip", ""), a.get("room", ""), channel=a.get("channel"),
-                          child=a.get("child", ""))
+                          child=a.get("child", ""), ieee=a.get("ieee", ""))
+    if name == "zigbee_pair":
+        return zigbee_pair(a.get("seconds", 120), a.get("name", ""), a.get("room", ""))
     if name == "hue_pair":
         return hue_pair(a["bridge_ip"], a.get("room"))
     if name == "change_device":
@@ -1353,7 +1491,8 @@ def main(argv):
     if not argv or argv[0] in ("help", "-h", "--help"):
         print(__doc__)
         print("Commands: list, scan, schedules, <action> <name> [value]  (actions: " + ", ".join(LIGHT_ACTIONS) + ",\n"
-              "or a command device's own), add <name> <kind> <ip> [room], remove <name>, hue_pair <bridge ip>, --mcp")
+              "or a command device's own), add <name> <kind> <ip or zigbee ieee> [room], remove <name>, hue_pair <bridge ip>,\n"
+              "zigbee_pair [seconds] [name], --mcp")
         return 0
     cmd = argv[0].lower()
     try:
@@ -1366,11 +1505,14 @@ def main(argv):
         elif cmd == "schedules":
             print(list_schedules())
         elif cmd == "add":
-            print(add_device(argv[1], argv[2], argv[3], argv[4] if len(argv) > 4 else ""))
+            print(add_device(argv[1], argv[2], argv[3], argv[4] if len(argv) > 4 else "",
+                             ieee=argv[3] if argv[2].lower() == "zigbee" else ""))
         elif cmd == "remove":
             print(remove_device(argv[1]))
         elif cmd == "hue_pair":
             print(hue_pair(argv[1]))
+        elif cmd == "zigbee_pair":
+            print(zigbee_pair(int(argv[1]) if len(argv) > 1 else 120, argv[2] if len(argv) > 2 else ""))
         elif len(argv) >= 2:
             out = control(argv[1], cmd, argv[2] if len(argv) > 2 else None)
             print(out)
