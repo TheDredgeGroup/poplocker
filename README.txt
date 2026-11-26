@@ -135,6 +135,10 @@ A TV or dock speaker puts its sound to sleep when nothing is playing. The window
 and for a minute after. After a quiet spell, the first reply starts about 3 seconds late, so no words get cut.
 
 TURN IT OFF
+Close the window and Pop Locker goes to sleep: nothing is read, and chats and code aren't saved. The window doesn't
+pop back up. It wakes the next time you start Claude, when you double-click "Pop Locker" on the Desktop, or when
+Windows starts. A chat you carry on with after it wakes is saved in full, including the part from while it slept.
+The phone door keeps working while it sleeps: what you say on the phone is still typed into Claude.
 Make a file named OFF in this folder to stop the reading. Delete the file to turn it back on.
 
 CREDITS

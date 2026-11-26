@@ -6,6 +6,9 @@ import ctypes, json, os, subprocess, sys, tempfile, threading, time, tkinter as 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TEXT_FILE = os.path.join(HERE, "last_reply.json")
 PID_FILE = os.path.join(HERE, "player.pid")
+# made when the user closes the window: Claude's replies then leave it closed (still saved, not read) until a new
+# Claude session or the Desktop icon opens it again
+CLOSED_FILE = os.path.join(HERE, "window_closed")
 PIPER = os.path.join(HERE, "piper", "piper.exe")
 VOICE_DIR = os.path.join(HERE, "voices")
 # the voices to pick from (both CC-BY-SA 4.0 - fine to sell with a credit)
@@ -29,6 +32,10 @@ BELOW_NORMAL = 0x00004000
 _one = ctypes.windll.kernel32.CreateMutexW(None, False, "ClaudeVoicePlayerWindow")
 if ctypes.windll.kernel32.GetLastError() == 183:      # ERROR_ALREADY_EXISTS
     sys.exit(0)
+try:
+    os.remove(CLOSED_FILE)      # opened again (Desktop icon, a new Claude session, Windows start): not closed any more
+except OSError:
+    pass
 with open(PID_FILE, "w") as f:
     f.write(str(os.getpid()))
 
@@ -714,6 +721,10 @@ def close():
     clear_wavs()
     try:
         os.remove(PID_FILE)
+    except OSError:
+        pass
+    try:
+        open(CLOSED_FILE, "w").close()      # closed on purpose: Claude's replies won't open it again
     except OSError:
         pass
     root.destroy()

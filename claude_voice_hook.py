@@ -11,6 +11,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PLAYER = os.path.join(HERE, "claude_voice_player.pyw")
 TEXT_FILE = os.path.join(HERE, "last_reply.json")
 PID_FILE = os.path.join(HERE, "player.pid")
+# made by the player when the user closes the window: Pop Locker then sleeps (no reading, no saving of chats or
+# code) until a new Claude session, the Desktop icon or Windows start opens it again
+CLOSED_FILE = os.path.join(HERE, "window_closed")
 MAX_PARAGRAPHS = 12
 
 
@@ -114,7 +117,13 @@ def main():
     if os.path.exists(os.path.join(HERE, "OFF")):
         return
     if "--open" in sys.argv:   # SessionStart hook: open the window when Claude opens
+        try:
+            os.remove(CLOSED_FILE)   # a new Claude session opens it again, even after it was closed
+        except OSError:
+            pass
         open_player()
+        return
+    if os.path.exists(CLOSED_FILE):   # the user closed the window: Pop Locker sleeps - nothing read or saved
         return
     try:
         data = json.load(sys.stdin)

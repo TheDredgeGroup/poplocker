@@ -41,7 +41,7 @@ SNAP_ALL_EVERY = 6 * 3600      # the after-reply save also checks every project 
 SNAP_ALL_STAMP = os.path.join(HERE, "code_snap_all.txt")
 # files Pop Locker itself rewrites while it runs - never a reason for a new version
 RUNTIME_FILES = {"code_snap_all.txt", "last_reply.json", "ears_status.txt", "skipped_files.txt", "ears_off",
-                 "talk_now", "control.txt", "route.json", "player_settings.json"}
+                 "talk_now", "control.txt", "route.json", "player_settings.json", "window_closed"}
 
 START_HERE = """This database keeps the full code of every project, as versions.
 
