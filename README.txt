@@ -36,6 +36,20 @@ and keys written in the code are blanked out first.
 - Database connection: host localhost, port 5488 (see db.json), user postgres, the password you chose.
   Any PostgreSQL tool, such as pgAdmin, can open it.
 
+YOUR PROJECTS' CODE
+The whole folder of every project Claude works on is saved too, as versions, so you can get the code back and run
+it even without Claude. Another AI or any PostgreSQL tool can read it: start with  SELECT * FROM start_here;
+- A new version is saved after a reply that changed the project, and every project is checked every 6 hours.
+- A version is marked working when it's pushed to GitHub or tagged, or when you mark it yourself.
+- Left out: virtual environments, caches, logs, videos, files over 25 MB, and files named like keys or passwords.
+  Passwords and keys written inside files are blanked out.
+- From the Pop Locker folder (python\python.exe is the Python that comes with it):
+    python\python.exe poplocker_code.py list                          every project and its versions
+    python\python.exe poplocker_code.py add "My App" C:\code\myapp --run "python main.py"
+    python\python.exe poplocker_code.py working "My App"              mark the newest version as working
+    python\python.exe poplocker_code.py pull "My App"                 write the latest working version to a folder
+    python\python.exe poplocker_code.py run "My App"                  pull it and start it
+
 THE WINDOW
 - Back / Pause / Skip / Stop work the reading. Click any paragraph to read from there.
 - Mic: listens for the wake word on this PC's mic. Talk: sends the next thing you say, no wake word needed.

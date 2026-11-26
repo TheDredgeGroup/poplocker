@@ -19,6 +19,10 @@ PopLocker is a companion for Claude Code on Windows. It isn't made by or affilia
 - **Every chat, project and file saved on your PC.** Each chat, and the latest version of every file Claude writes
   or edits, goes into your own PostgreSQL database, filed under its project. Search by keyword, date or project.
   Passwords and keys in the code are blanked out first. Nothing leaves your PC.
+- **Every project's code, as versions you can pull and run.** The whole folder of each project Claude works on is
+  saved after the replies that change it. Pushed or tagged versions are marked working. Pull the latest working
+  version back to disk and start it with one command, or read it with plain SQL from any other AI or tool
+  (`SELECT * FROM start_here;`).
 
 ## Install
 
@@ -39,6 +43,7 @@ The full instructions are in [README.txt](README.txt).
 | `claude_voice_hook.py` | Claude Code Stop hook: picks out the readable parts of each reply |
 | `claude_chat_save.py` | Saves the chats to the database |
 | `chat_search.pyw` | The History search window |
+| `poplocker_code.py` | Saves every project's code as versions; pulls a version back out and runs it |
 | `Setup.bat`, `setup_claude_voice.ps1`, `setup_hooks.py` | The installer |
 | `NuePost/` | Android app (Kotlin, Android Studio): hold to talk, posts your words to PopLocker |
 
