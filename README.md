@@ -30,6 +30,11 @@ PopLocker is a companion for Claude Code on Windows. It isn't made by or affilia
 2. Double-click `Setup.bat`, say Yes to the administrator prompt, and choose a password for your chat database.
 
 The zip includes its own Python, PostgreSQL, speech model and voices, so nothing else needs to be installed.
+
+**Been using Claude for a while?** After installing, ask Claude in Claude Code: *"Find all my projects, chats and
+code on this PC and load them into my Pop Locker database."* For chats older than about 30 days, or from the Claude
+app and claude.ai, download your history first (Claude Settings > Privacy > Export data) and ask Claude to load
+that zip too.
 The full instructions are in [README.txt](README.txt).
 
 ## What's in this repo

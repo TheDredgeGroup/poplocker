@@ -36,6 +36,14 @@ and keys written in the code are blanked out first.
 - Database connection: host localhost, port 5488 (see db.json), user postgres, the password you chose.
   Any PostgreSQL tool, such as pgAdmin, can open it.
 
+BRING IN YOUR PAST CHATS AND CODE
+Been using Claude for a while? Just ask Claude, in Claude Code on this PC:
+    Find all my projects, chats and code on this PC and load them into my Pop Locker database.
+Claude finds your project folders and saves their code as versions, and loads every Claude Code chat still on
+this PC. Claude Code keeps chats on the PC for about 30 days. For older chats from the Claude app or claude.ai,
+download your history first (Claude Settings > Privacy > Export data), then tell Claude where the zip is and ask
+it to load that too.
+
 YOUR PROJECTS' CODE
 The whole folder of every project Claude works on is saved too, as versions, so you can get the code back and run
 it even without Claude. Another AI or any PostgreSQL tool can read it: start with  SELECT * FROM start_here;
