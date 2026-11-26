@@ -869,15 +869,13 @@ try:        # Windows' dark title bar, to go with the charcoal (Windows 10 2004 
 except (OSError, ValueError, AttributeError):
     pass
 root.geometry(f"+{root.winfo_screenwidth() - root.winfo_width() - 40}+{root.winfo_screenheight() - root.winfo_height() - 90}")
-# start on the reply that's there now only if it's brand new; otherwise wait quietly for the next one
+# the window starts empty: an old reply is never shown again. Only one written in the last 15 seconds (the reply
+# that opened the window) is read.
 try:
     if os.path.exists(TEXT_FILE):
         import time
         if time.time() - os.path.getmtime(TEXT_FILE) > 15:
             state["mtime"] = os.path.getmtime(TEXT_FILE)
-            with open(TEXT_FILE, encoding="utf-8") as f:
-                state["paras"] = json.load(f)
-            state["i"] = len(state["paras"])   # Back still reads the last reply
 except (OSError, ValueError):
     pass
 fill_text()
