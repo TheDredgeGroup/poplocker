@@ -85,30 +85,278 @@ def clear_wavs():
     state["wavs"] = {}
 
 
+# sharp on high-DPI screens (a 4K at 150%): without this Windows stretches the whole window and every edge goes
+# soft. "System aware": Tk can't redraw itself when moved to a screen with other scaling, so it's drawn for the main one
+try:
+    ctypes.windll.shcore.SetProcessDpiAwareness(1)
+except (OSError, AttributeError):
+    try:
+        ctypes.windll.user32.SetProcessDPIAware()
+    except (OSError, AttributeError):
+        pass
+
 root = tk.Tk()
 root.title("Pop Locker")
 try:
-    root.iconbitmap(os.path.join(HERE, "icon", "poplocker.ico"))
+    root.iconbitmap(default=os.path.join(HERE, "icon", "poplocker.ico"))    # default: the wake word box gets it too
 except tk.TclError:
     pass
+SCALE = max(1.0, root.winfo_fpixels("1i") / 96.0)
+
+
+def px(n):
+    """A size in pixels at 100% scaling -> pixels on this screen."""
+    return int(round(n * SCALE))
+
+
 root.attributes("-topmost", True)
-root.configure(bg="#1e1e1e")
-root.minsize(380, 160)
-bar = tk.Frame(root, bg="#1e1e1e")
-bar.pack(side=tk.TOP, fill=tk.X)
-label = tk.Label(bar, text="", width=20, anchor="w", bg="#1e1e1e", fg="#CE93D8", font=("Arial", 10, "bold"))
-label.pack(side=tk.LEFT, padx=(10, 4), pady=6)
-# The reply's text, with the paragraph being read highlighted. Click a paragraph to read from it.
+root.minsize(px(300), px(230))
+root.geometry(f"{px(330)}x{px(300)}")
 # Claude's ears (claude_voice_ears.py): mic on/off, Talk (no wake word needed), and what they last heard
 EARS = os.path.join(HERE, "claude_voice_ears.py")
 EARS_PY = os.path.join(HERE, "python", "pythonw.exe")      # the Python that comes with the app
-ears_bar = tk.Frame(root, bg="#1e1e1e")
-ears_bar.pack(side=tk.TOP, fill=tk.X)
-ears_label = tk.Label(ears_bar, text="", anchor="w", bg="#1e1e1e", fg="#90A4AE", font=("Segoe UI", 9))
-box = tk.Text(root, wrap="word", height=10, width=58, bg="#262626", fg="#d0d0d0", relief="flat", padx=10,
-              pady=8, font=("Segoe UI", 10), cursor="hand2", spacing3=6)
-box.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
-box.tag_configure("cur", background="#5C3B66", foreground="#ffffff")
+
+# ---- the look: charcoal fading to grey, rounded buttons all one blue -------------------------------------------
+# Everything is drawn on one canvas: Tk's own buttons can't be rounded, and a gradient can't show behind them.
+import tkinter.font as tkfont
+TOP, MID, BOTTOM = (0x1c, 0x1c, 0x1c), (0x2b, 0x2b, 0x2b), (0x4a, 0x4a, 0x4a)
+BLUE, BLUE_HOVER, BLUE_DOWN = "#2F7BD8", "#4890E8", "#2466B5"
+PANEL = "#1f1f1f"
+BTN_FONT = tkfont.Font(family="Segoe UI", size=9, weight="bold")
+SMALL_FONT = tkfont.Font(family="Segoe UI", size=9)
+TITLE_FONT = tkfont.Font(family="Segoe UI", size=10, weight="bold")
+ICON_FONT = tkfont.Font(family="Segoe MDL2 Assets", size=10)       # Windows' own symbols (Windows 10 and 11)
+EMOJI_FONT = tkfont.Font(family="Segoe UI Emoji", size=10)
+I_BACK, I_PAUSE, I_PLAY, I_SKIP, I_STOP = "", "", "", "", ""
+I_MIC, I_MIC_OFF, I_TALK, I_DOWN, I_SEARCH, I_VOLUME = "", "", "", "", "", ""
+I_LOCK, I_DONE, I_SENT = "", "", ""
+I_EAR = "\U0001f442"            # the icon font has no ear: the emoji one
+
+cv = tk.Canvas(root, highlightthickness=0, bd=0, bg="#2b2b2b")
+cv.pack(fill=tk.BOTH, expand=True)
+
+
+def _mix(a, b, t):
+    t = min(1.0, max(0.0, t))
+    return "#%02x%02x%02x" % tuple(round(x + (y - x) * t) for x, y in zip(a, b))
+
+
+def shade(y, h):
+    """The background colour at height y: charcoal at the top, grey at the bottom."""
+    t = y / max(1, h - 1)
+    return _mix(TOP, MID, t / 0.45) if t < 0.45 else _mix(MID, BOTTOM, (t - 0.45) / 0.55)
+
+
+def _rgb(color):
+    return tuple(int(color[i:i + 2], 16) for i in (1, 3, 5))
+
+
+_pictures = {}
+
+
+def rounded_picture(w, h, r, color, top):
+    """A rounded box with smooth edges, as a picture. Tk draws its own shapes with jagged edges, so the edge pixels
+    are worked out here and blended with the background behind them (the fade at that height: `top` is where the
+    box sits on the canvas). Kept, so the same box isn't worked out twice."""
+    ch = cv.winfo_height()
+    key = (w, h, r, color, top, ch)
+    if key in _pictures:
+        return _pictures[key]
+    fg = _rgb(color)
+    r = min(r, w / 2, h / 2)
+    rows = []
+    for j in range(h):
+        cy = j + 0.5
+        if r <= cy <= h - r:
+            rows.append("{" + " ".join([color] * w) + "}")
+            continue
+        y_abs = top + j
+        bg = _rgb(shade(y_abs - y_abs % 2, ch))        # the fade is drawn in 2-pixel bands
+
+        def blend(a):
+            if a >= 1:
+                return color
+            return "#%02x%02x%02x" % tuple(round(b + (f - b) * max(0.0, a)) for f, b in zip(fg, bg))
+        ccy = r if cy < r else h - r
+        middle = blend(r - abs(cy - ccy) + 0.5)        # the same all along the straight top or bottom edge
+        row = []
+        for i in range(w):
+            cx = i + 0.5
+            if r <= cx <= w - r:
+                row.append(middle)
+            else:
+                ccx = r if cx < r else w - r
+                row.append(blend(r - ((cx - ccx) ** 2 + (cy - ccy) ** 2) ** 0.5 + 0.5))
+        rows.append("{" + " ".join(row) + "}")
+    pic = tk.PhotoImage(width=w, height=h)
+    pic.put(" ".join(rows))
+    if len(_pictures) > 300:
+        _pictures.clear()
+    _pictures[key] = pic
+    return pic
+
+
+class Tip:
+    """The words for a symbol, shown when the mouse rests on its button."""
+    win, job = None, None
+
+    @classmethod
+    def later(cls, text):
+        cls.hide()
+        cls.job = root.after(450, lambda: cls._show(text() if callable(text) else text))
+
+    @classmethod
+    def _show(cls, text):
+        cls.job = None
+        w = cls.win = tk.Toplevel(root)
+        w.overrideredirect(True)
+        w.attributes("-topmost", True)
+        tk.Label(w, text=text, bg="#111111", fg="#ffffff", font=SMALL_FONT, padx=px(8), pady=px(3)).pack()
+        w.update_idletasks()
+        # above the pointer and kept inside the window's width (it sits in the screen's bottom right corner)
+        x = min(root.winfo_pointerx() - px(10), root.winfo_rootx() + root.winfo_width() - w.winfo_reqwidth())
+        x = max(x, root.winfo_rootx())
+        w.geometry(f"+{x}+{root.winfo_pointery() - w.winfo_reqheight() - px(12)}")
+
+    @classmethod
+    def hide(cls):
+        if cls.job:
+            root.after_cancel(cls.job)
+            cls.job = None
+        if cls.win:
+            cls.win.destroy()
+            cls.win = None
+
+
+class RoundButton:
+    """A rounded blue button drawn on the canvas: a symbol, words, or both. `tip` (words, or a function giving
+    them) says what it does when the mouse rests on it."""
+    H = px(28)
+
+    def __init__(self, icon, text, command, tip, icon_font=ICON_FONT, round_=False, icon_after=False):
+        self.icon, self.text, self.command, self.tip = icon, text, command, tip
+        self.icon_font, self.round, self.icon_after = icon_font, round_, icon_after
+        self.box, self.inside, self.pressed, self.items = None, False, False, None
+
+    def width(self):
+        if self.round:
+            return self.H
+        w = px(26)
+        if self.icon:
+            w += self.icon_font.measure(self.icon)
+        if self.text:
+            w += BTN_FONT.measure(self.text) + (px(6) if self.icon else 0)
+        return w
+
+    def place(self, x, y, w=None):
+        self.box = (int(x), int(y), int(w or self.width()), self.H)
+        if self.items is None:
+            # only the picture takes the mouse; the symbol and words on it are "disabled" so they don't
+            self.items = {
+                "shape": cv.create_image(0, 0, anchor="nw", tags="chrome"),
+                "icon": cv.create_text(0, 0, anchor="w", fill="white", disabledfill="white", state="disabled"),
+                "text": cv.create_text(0, 0, anchor="w", fill="white", disabledfill="white", state="disabled",
+                                       font=BTN_FONT)}
+            s = self.items["shape"]
+            cv.tag_bind(s, "<Enter>", self._enter)
+            cv.tag_bind(s, "<Leave>", self._leave)
+            cv.tag_bind(s, "<ButtonPress-1>", self._down)
+            cv.tag_bind(s, "<ButtonRelease-1>", self._up)
+        self.draw()
+
+    def paint(self):
+        x, y, w, h = self.box
+        color = BLUE_DOWN if self.pressed else (BLUE_HOVER if self.inside else BLUE)
+        cv.itemconfig(self.items["shape"], image=rounded_picture(w, h, h / 2, color, y))
+
+    def draw(self):
+        if not self.items:
+            return
+        x, y, w, h = self.box
+        it = self.items
+        cv.coords(it["shape"], x, y)
+        self.paint()
+        cy = y + h / 2
+        iw = self.icon_font.measure(self.icon) if self.icon else 0
+        tw = BTN_FONT.measure(self.text) if self.text else 0
+        gap = px(6) if self.icon and self.text else 0
+        left = x + (w - iw - gap - tw) / 2
+        cv.itemconfig(it["icon"], text=self.icon or "", font=self.icon_font)
+        icon_x, text_x = (left + tw + gap, left) if self.icon_after else (left, left + iw + gap)
+        cv.coords(it["icon"], icon_x, cy)
+        cv.itemconfig(it["text"], text=self.text or "")
+        cv.coords(it["text"], text_x, cy)
+
+    def config(self, icon=None, text=None, tip=None):
+        if icon is not None:
+            self.icon = icon
+        if text is not None:
+            self.text = text
+        if tip is not None:
+            self.tip = tip
+        self.draw()
+
+    def _enter(self, _e):
+        self.inside = True
+        self.paint()
+        Tip.later(self.tip)
+
+    def _leave(self, _e):
+        self.inside = self.pressed = False
+        self.paint()
+        Tip.hide()
+
+    def _down(self, _e):
+        self.pressed = True
+        self.paint()
+
+    def _up(self, _e):
+        Tip.hide()
+        self.pressed = False
+        self.paint()
+        if self.inside:
+            self.command()
+
+
+# the title, what's being read (top right), and what the ears last did (the bottom line)
+title_icon = cv.create_text(px(12), px(16), anchor="w", text=I_LOCK, font=ICON_FONT, fill=BLUE)
+title_text = cv.create_text(px(32), px(16), anchor="w", text="Pop Locker", font=TITLE_FONT, fill="#ffffff")
+status_text = cv.create_text(0, px(16), anchor="e", text="", font=SMALL_FONT, fill="#9aa4ad")
+status_icon = cv.create_text(0, px(16), anchor="e", text="", font=ICON_FONT, fill="#9aa4ad")
+ears_text = cv.create_text(px(14), 0, anchor="w", text="", font=SMALL_FONT, fill="#b0b8c0")
+ears_said = {"text": ""}
+panel = cv.create_image(0, 0, anchor="nw")
+
+
+def set_status(icon, text):
+    cv.itemconfig(status_icon, text=icon)
+    cv.itemconfig(status_text, text=text)
+    place_status()
+
+
+def place_status():
+    w = cv.winfo_width()
+    cv.coords(status_text, w - px(12), px(16))
+    bbox = cv.bbox(status_text)
+    cv.coords(status_icon, (bbox[0] if bbox and cv.itemcget(status_text, "text") else w - px(12)) - px(5), px(16))
+
+
+def set_ears(text):
+    """The bottom line, cut short with ... to fit the window."""
+    ears_said["text"] = text
+    room = cv.winfo_width() - px(28)
+    if SMALL_FONT.measure(text) > room > 20:
+        while text and SMALL_FONT.measure(text + "...") > room:
+            text = text[:-1]
+        text = text.rstrip() + "..."
+    cv.itemconfig(ears_text, text=text)
+
+
+# The reply's text, with the paragraph being read highlighted. Click a paragraph to read from it.
+box = tk.Text(cv, wrap="word", bg=PANEL, fg="#c9c9c9", relief="flat", bd=0, highlightthickness=0, padx=px(6),
+              pady=px(4), font=("Segoe UI", 9), cursor="hand2", spacing3=px(6), selectbackground=BLUE)
+box_win = cv.create_window(0, 0, anchor="nw", window=box)
+box.tag_configure("cur", background=BLUE, foreground="#ffffff")
 box.config(state="disabled")
 
 
@@ -134,11 +382,11 @@ def highlight():
 def show():
     n, i = len(state["paras"]), state["i"]
     if 0 <= i < n:
-        label.config(text=f"\U0001f50a Claude  {i + 1} of {n}")
+        set_status(I_VOLUME, f"{i + 1} of {n}")
     elif n:
-        label.config(text=f"\u2714 Done  ({n} paragraphs)")
+        set_status(I_DONE, f"Done, {n} paragraph{'s' if n != 1 else ''}")
     else:
-        label.config(text="Waiting for Claude...")
+        set_status("", "Waiting for Claude")
     highlight()
 
 
@@ -172,7 +420,7 @@ def halt():
 
 def unpause():
     state["paused"] = None
-    pause_btn.config(text="⏸ Pause")
+    pause_btn.config(icon=I_PAUSE, text="Pause")
 
 
 def play(i):
@@ -274,8 +522,8 @@ def pause():
         at = from_ms + int((time.monotonic() - started) * 1000)
     halt()
     state["paused"] = (state["reply"], i, max(0, at - 300))   # back up a hair so no word is clipped
-    pause_btn.config(text="▶ Play")
-    label.config(text=f"⏸ Paused  {i + 1} of {n}")
+    pause_btn.config(icon=I_PLAY, text="Play")
+    set_status(I_PAUSE, f"Paused, {i + 1} of {n}")
 
 
 def back():
@@ -374,14 +622,21 @@ def talk():
 
 
 def show_mic():
-    off = os.path.exists(os.path.join(HERE, "ears_off"))
-    mic_btn.config(text="\U0001f507 Mic off" if off else "\U0001f3a4 Mic on", bg="#555555" if off else "#1565C0")
+    mic_btn.config(icon=I_MIC_OFF if os.path.exists(os.path.join(HERE, "ears_off")) else I_MIC)
+
+
+def mic_tip():
+    if os.path.exists(os.path.join(HERE, "ears_off")):
+        return "Mic is off. Click to listen for the wake word"
+    return f"Mic is on, listening for “{wake_word()}”. Click to turn it off"
 
 
 def ears_watch():
     """What the ears last did, and any reader command they heard ("Hey Claude, pause")."""
     try:
-        ears_label.config(text=open(os.path.join(HERE, "ears_status.txt"), encoding="utf-8").read()[:80])
+        said = open(os.path.join(HERE, "ears_status.txt"), encoding="utf-8").read().strip()
+        if said != ears_said["text"]:
+            set_ears(said)
     except OSError:
         pass
     c = os.path.join(HERE, "control.txt")
@@ -446,7 +701,7 @@ def watch():
             if elsewhere:
                 state["i"] = len(paras)          # not read here; Back still reads it
                 show()
-                label.config(text=f"➡ Read on {elsewhere}")
+                set_status(I_SENT, f"Read on {elsewhere}")
             else:
                 play(0)
     except (OSError, ValueError):
@@ -462,19 +717,6 @@ def close():
     except OSError:
         pass
     root.destroy()
-
-
-buttons = {}
-for text, cmd, bg in (("\u23ee Back", back, "#404040"), ("\u23f8 Pause", pause, "#2E7D32"),
-                      ("\u23ed Skip", skip, "#404040"), ("\u23f9 Stop", stop, "#B71C1C")):
-    buttons[cmd] = tk.Button(bar, text=text, command=cmd, bg=bg, fg="white", width=8,
-                             font=("Arial", 10, "bold"))
-    buttons[cmd].pack(side=tk.LEFT, padx=3, pady=6)
-pause_btn = buttons[pause]
-mic_btn = tk.Button(ears_bar, text="", command=mic_toggle, fg="white", width=10, font=("Arial", 9, "bold"))
-mic_btn.pack(side=tk.LEFT, padx=(10, 3), pady=(0, 4))
-tk.Button(ears_bar, text="\U0001f5e3 Talk", command=talk, bg="#6A1B9A", fg="white", width=8,
-          font=("Arial", 9, "bold")).pack(side=tk.LEFT, padx=3, pady=(0, 4))
 
 
 def save_setting(key, value):
@@ -510,7 +752,6 @@ def set_wake():
         return
     new = " ".join(new.split()) or DEFAULT_WAKE
     save_setting("wake", new)
-    wake_btn.config(text="\U0001f442 " + new)
 
 
 def pick_voice(name):
@@ -529,15 +770,29 @@ def pick_voice(name):
         play(state["i"])
 
 
+def short_voice(name):
+    """ "Male - Northern" -> "Northern", for the button."""
+    return name.split(" - ")[-1]
+
+
 voice_var = tk.StringVar(value=voice_name)
-voice_menu = tk.OptionMenu(ears_bar, voice_var, *VOICES.keys(), command=pick_voice)
-voice_menu.config(bg="#333333", fg="white", activebackground="#444444", activeforeground="white",
-                  highlightthickness=0, font=("Arial", 9), width=14)
-voice_menu["menu"].config(bg="#333333", fg="white")
-voice_menu.pack(side=tk.LEFT, padx=3, pady=(0, 4))
-wake_btn = tk.Button(ears_bar, text="\U0001f442 " + wake_word(), command=set_wake, bg="#333333", fg="white",
-                     font=("Arial", 9))
-wake_btn.pack(side=tk.LEFT, padx=3, pady=(0, 4))
+voice_popup = tk.Menu(root, tearoff=0, bg="#2b2b2b", fg="white", activebackground=BLUE, activeforeground="white",
+                      selectcolor="white", font=SMALL_FONT)
+
+
+def choose_voice(name):
+    voice_btn.config(text=short_voice(name))
+    layout()
+    pick_voice(name)
+
+
+for _name in VOICES:
+    voice_popup.add_radiobutton(label=_name, variable=voice_var, value=_name, command=lambda n=_name: choose_voice(n))
+
+
+def open_voices():
+    x, y, w, h = voice_btn.box
+    voice_popup.tk_popup(cv.winfo_rootx() + int(x), cv.winfo_rooty() + int(y + h + 2))
 
 
 def open_history():
@@ -545,14 +800,74 @@ def open_history():
     subprocess.Popen([EARS_PY, os.path.join(HERE, "chat_search.pyw")], cwd=HERE, creationflags=NO_WINDOW)
 
 
+# the reader's buttons (top row) and the ears' buttons (bottom row)
+back_btn = RoundButton(I_BACK, "", back, "Back: read the paragraph before", round_=True)
+pause_btn = RoundButton(I_PAUSE, "Pause", pause, "Pause, or carry on from where it stopped")
+skip_btn = RoundButton(I_SKIP, "", skip, "Skip to the next paragraph", round_=True)
+stop_btn = RoundButton(I_STOP, "", stop, "Stop reading", round_=True)
+mic_btn = RoundButton(I_MIC, "", mic_toggle, mic_tip, round_=True)
+talk_btn = RoundButton(I_TALK, "Talk", talk, "Talk: send the next thing you say, no wake word needed")
+voice_btn = RoundButton(I_DOWN, short_voice(voice_name), open_voices, "The reading voice", icon_after=True)
+wake_btn = RoundButton(I_EAR, "", set_wake, lambda: f"Wake word: “{wake_word()}”. Click to change it",
+                       icon_font=EMOJI_FONT, round_=True)
+history_btn = RoundButton(I_SEARCH, "", open_history, "History: search your saved chats", round_=True)
+bottom_row = [mic_btn, talk_btn, voice_btn, wake_btn]
 if os.path.exists(os.path.join(HERE, "chat_search.pyw")):
-    tk.Button(ears_bar, text="\U0001f50e History", command=open_history, bg="#1565C0", fg="white",
-              font=("Arial", 9)).pack(side=tk.LEFT, padx=3, pady=(0, 4))
-ears_label.pack(side=tk.LEFT, padx=8, pady=(0, 4), fill=tk.X, expand=True)
+    bottom_row.append(history_btn)
+
+
+def layout(_event=None):
+    """Draw the background and put everything in place for the window's size."""
+    w, h = cv.winfo_width(), cv.winfo_height()
+    if w < px(100) or h < px(100):
+        return
+    gap, side, bh = px(6), px(12), RoundButton.H
+    cv.delete("bg")
+    for y in range(0, h, 2):
+        cv.create_line(0, y + 1, w, y + 1, fill=shade(y, h), width=2, tags="bg")
+    cv.tag_lower("bg")
+    place_status()
+    # top row: Back, Pause (the wide one), Skip, Stop
+    y = px(32)
+    pause_w = w - 2 * side - 3 * bh - 3 * gap
+    back_btn.place(side, y)
+    pause_btn.place(side + bh + gap, y, pause_w)
+    skip_btn.place(side + bh + 2 * gap + pause_w, y)
+    stop_btn.place(w - side - bh, y)
+    # the reply, on a darker rounded panel
+    top, bottom = y + bh + px(10), h - px(64)
+    cv.coords(panel, side, top)
+    cv.itemconfig(panel, image=rounded_picture(w - 2 * side, bottom - top, px(10), PANEL, top))
+    cv.coords(box_win, side + px(6), top + px(6))
+    cv.itemconfig(box_win, width=max(10, w - 2 * side - px(12)), height=max(10, bottom - top - px(12)))
+    # bottom row: Mic, Talk, voice, wake word, History; then what the ears last did
+    x, y = side, h - px(58)
+    for b in bottom_row:
+        b.place(x, y)
+        x += b.width() + gap
+    cv.coords(ears_text, side + px(2), h - px(15))
+    set_ears(ears_said["text"])
+
+
+_pending = {"job": None}
+
+
+def _resized(_event):
+    if _pending["job"]:
+        root.after_cancel(_pending["job"])
+    _pending["job"] = root.after(30, layout)
+
+
+cv.bind("<Configure>", _resized)
 show_mic()
 keep_awake()
 root.protocol("WM_DELETE_WINDOW", close)
 root.update_idletasks()
+try:        # Windows' dark title bar, to go with the charcoal (Windows 10 2004 and later; ignored elsewhere)
+    ctypes.windll.dwmapi.DwmSetWindowAttribute(ctypes.c_void_p(int(root.wm_frame(), 16)), 20,
+                                               ctypes.byref(ctypes.c_int(1)), 4)
+except (OSError, ValueError, AttributeError):
+    pass
 root.geometry(f"+{root.winfo_screenwidth() - root.winfo_width() - 40}+{root.winfo_screenheight() - root.winfo_height() - 90}")
 # start on the reply that's there now only if it's brand new; otherwise wait quietly for the next one
 try:
