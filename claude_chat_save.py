@@ -108,8 +108,10 @@ SECRET_VALUES = [
                r"|\bAIza[0-9A-Za-z_-]{35}(?![0-9A-Za-z_-])|\bGOCSPX-[0-9A-Za-z_-]{20,}|\bya29\.[0-9A-Za-z._-]{20,}"   # Google
                r"|\bxox[abeoprs]-[0-9A-Za-z-]{10,}|\bxapp-[0-9A-Za-z-]{10,}|hooks\.slack\.com/services/[0-9A-Za-z/]+"  # Slack
                ),
-    re.compile(r"""((?:api_?key|password|passwd|pass|pwd|secret|token)\w*["']?\s*[:=]\s*["'])[^"'\s]{6,}(["'])""", re.I),
-    re.compile(r"((?:set\s+)?\w*(?:PASSWORD|PASSWD|PWD|KEY|TOKEN|SECRET)\w*=)[^\s\"']{6,}", re.I),
+    re.compile(r"""((?:api_?key|password|passwd|(?-i:pass)|pwd|secret|token)\w*["']?\s*[:=]\s*["'])[^"'\s]{6,}(["'])""", re.I),
+    # unquoted values only on settings lines (SET DB_PASSWORD=..., .env files) - never code like key=lambda ...
+    re.compile(r"(?m)^(\s*(?:[Ss][Ee][Tt]\s+|export\s+)?[A-Z0-9_]*(?:PASSWORD|PASSWD|PWD|KEY|TOKEN|SECRET)[A-Z0-9_]*"
+               r"=)[^\s\"'(),]{6,}(?=\s|$)"),
 ]
 # the password in postgres://user:password@host, keeping the rest of the address
 SECRET_IN_ADDRESS = re.compile(r"""(\b[a-z][a-z0-9+.-]*://[^\s:/@'"]*:)[^\s/@'"]+(@)""", re.I)
@@ -254,7 +256,7 @@ def project_name(session, cwd, titles):
     return titles.get(session) or os.path.basename((cwd or "").rstrip("\\/")) or "(no project)"
 
 
-def save(path, cwd=None):
+def save(path, cwd=None, code=True):
     rows, files = rows_from(path, cwd)
     if not rows:
         return 0
@@ -274,6 +276,13 @@ def save(path, cwd=None):
                                      project = EXCLUDED.project, content = EXCLUDED.content, edits = EXCLUDED.edits,
                                      updated_at = EXCLUDED.updated_at""", files, page_size=100)
     conn.close()
+    # and the whole project each file belongs to, as a new version in the code tables (poplocker_code.py)
+    try:
+        if code:
+            from poplocker_code import snap_touched
+            snap_touched([f[4] for f in files])
+    except Exception as e:
+        print("code save:", e, file=sys.stderr)
     return n
 
 
@@ -284,7 +293,12 @@ if __name__ == "__main__":
     elif "--all" in sys.argv:
         files = glob.glob(os.path.expanduser(r"~\.claude\projects\*\*.jsonl"))
         for p in files:
-            save(p)
+            save(p, code=False)
+        try:
+            from poplocker_code import snap_touched
+            snap_touched([], everything=True)     # every project folder once, at the end
+        except Exception as e:
+            print("code save:", e, file=sys.stderr)
         with connect() as conn, conn.cursor() as cur:
             cur.execute("SELECT (SELECT count(*) FROM messages), (SELECT count(*) FROM artifacts)")
             msgs, arts = cur.fetchone()
